@@ -4,7 +4,7 @@ import pandas as pd
 from collections import defaultdict
 from datetime import datetime
 from sqlalchemy import func
-from PySide6.QtCore import Qt, Signal, QDate, QSortFilterProxyModel
+from PySide6.QtCore import Qt, Signal, QDate, QSortFilterProxyModel, QMargins
 from PySide6.QtGui import QIntValidator, QStandardItemModel, QStandardItem, QPainter
 from PySide6.QtWidgets import (
     QApplication, 
@@ -2315,6 +2315,12 @@ class MainWidget(QWidget):
         main_layout.setStretch(0, 1) 
         main_layout.setStretch(1, 4) 
         self.setLayout(main_layout)
+        self.page_stack.setMinimumWidth(1100)
+        self.chart_view.setMinimumWidth(1000)
+        self.chart_view.setMinimumHeight(400)
+        self.chart_view.setContentsMargins(10, 10, 30, 10)
+
+
     
     def create_nav_frame(self, user_role): 
         nav_frame = QFrame()
@@ -2414,17 +2420,12 @@ class MainWidget(QWidget):
             print(f"Gagal memuat data mahasiswa: {e}")
         self.page_stack.setCurrentIndex(1)
 
-    # --- FUNGSI BARU: MEMBUAT GRAFIK GARIS (TREND) ---
     def create_trend_chart(self):
         # 1. Buat Seri Data (garis)
         self.trend_series = QLineSeries()
         self.trend_series.setName("Mahasiswa Aktif")
-
-        # --- TAMBAHAN: Menampilkan titik/marker pada grafik ---
         self.trend_series.setPointsVisible(True)
-        # --- PERUBAHAN: Diperkecil dari 8.0 menjadi 5.0 ---
         self.trend_series.setMarkerSize(5.0) 
-        # --- AKHIR PERUBAHAN ---
 
         # 2. Buat Chart dan tambahkan Seri
         chart = QChart()
@@ -2432,13 +2433,15 @@ class MainWidget(QWidget):
         chart.setTitle("Tren Jumlah Mahasiswa Aktif per Tahun Masuk")
         chart.setAnimationOptions(QChart.SeriesAnimations)
 
+        # --- PERUBAHAN: Memberi margin internal agar label tidak terpotong ---
+        # (Kiri, Atas, Kanan, Bawah)
+        chart.setMargins(QMargins(20, 10, 20, 10)) 
+        # --- AKHIR PERUBAHAN ---
+
         # 3. Buat Sumbu X (Tahun)
         self.trend_axis_x = QValueAxis()
         self.trend_axis_x.setTitleText("Tahun Masuk")
-        self.trend_axis_x.setLabelFormat("%d") # Tampilkan sebagai angka bulat
-        
-        # --- PERUBAHAN: Baris setTickCount(5) DIHAPUS ---
-        # Pengaturan tick akan diatur sepenuhnya di update_dashboard_stats
+        self.trend_axis_x.setLabelFormat("%d")
         
         chart.addAxis(self.trend_axis_x, Qt.AlignBottom)
         self.trend_series.attachAxis(self.trend_axis_x)
@@ -2460,8 +2463,6 @@ class MainWidget(QWidget):
         
         return chart_view
 
-   # --- FUNGSI DIPERBARUI: Mengisi data teks DAN data grafik ---
-    # --- FUNGSI DIPERBARUI: Mengisi data teks DAN data grafik ---
     def update_dashboard_stats(self):
         # Memastikan label sudah dibuat sebelum diupdate
         if not hasattr(self, 'label_stats_mhs'):
@@ -2486,6 +2487,7 @@ class MainWidget(QWidget):
             # --- Query 2: Statistik Grafik Tren ---
             self.trend_series.clear()
             
+            # Ambil data 2021 s/d 2025
             trend_data = db.query(
                                 Mahasiswa.tahun_masuk, 
                                 func.count(Mahasiswa.id)
@@ -2496,36 +2498,40 @@ class MainWidget(QWidget):
                            .order_by(Mahasiswa.tahun_masuk) \
                            .all()
             
+            # --- PERBAIKAN SUMBU X AGAR DATA SESUAI DAN RAPI ---
+            # Kita atur range visual dari 2020 sampai 2026.
+            # Ini memberi ruang 1 tahun di kiri (sebelum 2021) dan 1 tahun di kanan (setelah 2025).
+            start_view = 2020
+            end_view = 2026
             
-            # --- PERUBAHAN: Set rentang Sumbu-X manual 2021-2025 "Pas-pasan" ---
-            # Rentang diatur dari 2020.5 (agar 2021 tidak terpotong)
-            # sampai 2025.5 (agar 2025 tidak terpotong)
-            self.trend_axis_x.setRange(2021 - 0.5, 2025 + 0.5) 
-            self.trend_axis_x.setTickInterval(1) # Paksa label per 1 tahun
-            # --- AKHIR PERUBAHAN ---
+            self.trend_axis_x.setRange(start_view, end_view)
+            
+            # Hitung jumlah tick agar SETIAP tahun muncul labelnya.
+            # Rumus: (Tahun Akhir - Tahun Awal) + 1
+            # Contoh: (2026 - 2020) + 1 = 7 Tick (2020, 21, 22, 23, 24, 25, 26)
+            tick_count = (end_view - start_view) + 1
+            self.trend_axis_x.setTickCount(tick_count)
+            # --- AKHIR PERBAIKAN ---
 
             if trend_data:
-                # Siapkan data untuk sumbu
+                # Cari nilai tertinggi untuk batas atas sumbu Y
                 max_count = 0
                 
+                # Masukkan data ke seri
                 for tahun, jumlah in trend_data:
                     self.trend_series.append(tahun, jumlah)
                     if jumlah > max_count:
                         max_count = jumlah
                 
-                # Set Sumbu Y. max(10, ...) agar grafik tidak kosong jika datanya 0
-                self.trend_axis_y.setRange(0, max(10, max_count + (max_count * 0.1) + 5))
+                # Set Sumbu Y agar grafik tidak mentok atas
+                self.trend_axis_y.setRange(0, max(10, max_count + (max_count * 0.1) + 2))
             
             else:
-                # Jika tidak ada data, tampilkan data dummy
-                # (Tidak akan tampil karena range 2021-2025, tapi biarkan saja)
+                # Jika tidak ada data, tampilkan data dummy (flat line)
                 current_year = datetime.now().year 
                 self.trend_series.append(current_year - 1, 0)
                 self.trend_series.append(current_year, 0)
-
-                # Sumbu-X sudah diatur di atas, Sumbu-Y diatur ke 10
                 self.trend_axis_y.setRange(0, 10)
-
 
         except Exception as e:
             print(f"Gagal memuat statistik dashboard: {e}")
@@ -2535,24 +2541,32 @@ class MainWidget(QWidget):
         finally:
             db.close()
             
-    # --- FUNGSI UNTUK MEMBUAT TAMPILAN HOME (DIROMBAK) ---
+    
     # --- FUNGSI UNTUK MEMBUAT TAMPILAN HOME (DIROMBAK) ---
     def create_home_page(self):
         home_widget = QWidget()
+        
+        # --- PERUBAHAN: CSS dibersihkan, PADDING DIHAPUS dari CSS ---
+        # Kita menggunakan layout margin (setContentsMargins) di bawah, bukan CSS.
         home_widget.setStyleSheet("""
             QWidget { 
                 background-color: #FFFFFF; 
-                padding: 20px; 
             }
             QLabel {
                 background-color: transparent; 
                 color: #000000; 
             }
         """)
+        # --- AKHIR PERUBAHAN ---
         
         main_layout = QVBoxLayout(home_widget)
         main_layout.setSpacing(20)
-        main_layout.setAlignment(Qt.AlignTop) # Rata atas
+        main_layout.setAlignment(Qt.AlignTop)
+
+        # --- PERUBAHAN: Mengatur jarak pinggir menggunakan Layout System ---
+        # (Kiri, Atas, Kanan, Bawah) -> Memberi jarak 30px dari pinggir layar
+        main_layout.setContentsMargins(30, 30, 30, 30)
+        # --- AKHIR PERUBAHAN ---
 
         # 1. Label Selamat Datang
         self.welcome_label = QLabel("Selamat Datang!")
@@ -2585,12 +2599,9 @@ class MainWidget(QWidget):
         # 3. Buat dan tambahkan Grafik Tren
         self.chart_view = self.create_trend_chart()
         
-        # --- PERUBAHAN DIKEMBALIKAN ---
-        # Set agar grafik mengambil semua sisa ruang (bukan 1 bagian)
+        # Set agar grafik mengambil semua sisa ruang
         self.chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.chart_view) 
-        # Baris main_layout.addStretch(1) dihapus
-        # --- AKHIR PERUBAHAN ---
         
         return home_widget
 
@@ -2621,6 +2632,7 @@ class MainWidget(QWidget):
             self.btn_pengguna.hide()
         else:
             self.btn_pengguna.show()
+
 # ====================================================================
 # --- WADAH UTAMA: JENDELA APLIKASI ---
 # ====================================================================
