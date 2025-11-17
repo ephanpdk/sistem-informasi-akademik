@@ -2479,7 +2479,7 @@ class MainWidget(QWidget):
         
         db = SessionLocal()
         try:
-            # === 1. UPDATE TEKS STATISTIK ===
+            # === 1. TEKS STATISTIK ===
             count_mhs = db.query(func.count(Mahasiswa.id)).scalar() or 0
             count_dosen = db.query(func.count(Dosen.id)).scalar() or 0
             count_prodi = db.query(func.count(Mahasiswa.program_studi.distinct())).scalar() or 0
@@ -2488,114 +2488,119 @@ class MainWidget(QWidget):
             self.label_stats_dosen.setText(f"Total Dosen: {count_dosen}")
             self.label_stats_prodi.setText(f"Total Program Studi: {count_prodi}")
             
-            # === 2. UPDATE GRAFIK TREN (LINE) ===
-            self.trend_series.clear()
-            self.label_series.clear()
-            
+            # === 2. GRAFIK TREN (LINE) ===
+            self.trend_series.clear(); self.label_series.clear()
             trend_data = db.query(Mahasiswa.tahun_masuk, func.count(Mahasiswa.id))\
                            .filter(Mahasiswa.status == 'Aktif')\
                            .filter(Mahasiswa.tahun_masuk.between(2021, 2025))\
-                           .group_by(Mahasiswa.tahun_masuk)\
-                           .order_by(Mahasiswa.tahun_masuk).all()
+                           .group_by(Mahasiswa.tahun_masuk).order_by(Mahasiswa.tahun_masuk).all()
             
-            self.trend_axis_x.setRange(2020, 2026)
-            self.trend_axis_x.setTickCount(7)
-
+            self.trend_axis_x.setRange(2020, 2026); self.trend_axis_x.setTickCount(7)
             if trend_data:
                 max_count = 0
                 for tahun, jumlah in trend_data:
-                    self.trend_series.append(tahun, jumlah)
-                    self.label_series.append(tahun, jumlah + 1.5) # Offset label
+                    self.trend_series.append(tahun, jumlah); self.label_series.append(tahun, jumlah + 1.5)
                     if jumlah > max_count: max_count = jumlah
                 self.trend_axis_y.setRange(0, max(10, max_count + 5))
             else:
-                current_year = datetime.now().year
-                self.trend_series.append(current_year - 1, 0)
-                self.trend_series.append(current_year, 0)
-                self.trend_axis_y.setRange(0, 10)
+                self.trend_series.append(datetime.now().year, 0); self.trend_axis_y.setRange(0, 10)
 
-            # === 3. UPDATE GRAFIK IPK (BAR) ===
+            # === 3. GRAFIK RATA-RATA IPK (BAR) ===
             self.gpa_series.clear()
-            raw_data = db.query(Mahasiswa.program_studi, Nilai.nilai_angka, Matakuliah.sks)\
-                         .join(Nilai, Mahasiswa.id == Nilai.mahasiswa_id)\
-                         .join(Matakuliah, Nilai.matakuliah_id == Matakuliah.id)\
-                         .filter(Mahasiswa.status == 'Aktif').all()
+            raw_gpa = db.query(Mahasiswa.program_studi, Nilai.nilai_angka, Matakuliah.sks)\
+                        .join(Nilai, Mahasiswa.id == Nilai.mahasiswa_id)\
+                        .join(Matakuliah, Nilai.matakuliah_id == Matakuliah.id)\
+                        .filter(Mahasiswa.status == 'Aktif').all()
 
             stats_prodi = defaultdict(lambda: [0.0, 0])
-            for prodi, nilai_angka, sks in raw_data:
-                if prodi:
-                    stats_prodi[prodi][0] += (nilai_angka * sks)
-                    stats_prodi[prodi][1] += sks
+            for prodi, val, sks in raw_gpa:
+                if prodi: stats_prodi[prodi][0] += val * sks; stats_prodi[prodi][1] += sks
 
-            bar_set_gpa = QBarSet("Rata-rata IPK")
-            bar_set_gpa.setColor(QColor("#27AE60")) # Emerald Green
-            bar_set_gpa.setLabelColor(Qt.white)
-            label_font = QFont("Arial", 11); label_font.setBold(True)
-            bar_set_gpa.setLabelFont(label_font)
+            bar_gpa = QBarSet("Rata-rata IPK"); bar_gpa.setColor(QColor("#27AE60")); bar_gpa.setLabelColor(Qt.white)
+            label_font = QFont("Arial", 11); label_font.setBold(True); bar_gpa.setLabelFont(label_font)
             
-            cat_gpa = []
+            cats_gpa = []
             if stats_prodi:
-                for prodi, data in stats_prodi.items():
-                    avg = data[0] / data[1] if data[1] > 0 else 0.0
-                    bar_set_gpa.append(round(avg, 2))
-                    cat_gpa.append(prodi)
-            else:
-                bar_set_gpa.append(0); cat_gpa.append("-")
+                for prodi, d in stats_prodi.items():
+                    bar_gpa.append(round(d[0]/d[1], 2) if d[1] > 0 else 0); cats_gpa.append(prodi)
+            else: bar_gpa.append(0); cats_gpa.append("-")
+            
+            self.gpa_series.append(bar_gpa); self.gpa_axis_x.clear(); self.gpa_axis_x.append(cats_gpa)
 
-            self.gpa_series.append(bar_set_gpa)
-            self.gpa_axis_x.clear(); self.gpa_axis_x.append(cat_gpa)
-
-            # === 4. UPDATE GRAFIK STATUS (DONUT) ===
+            # === 4. GRAFIK STATUS (DONUT) ===
             self.status_series.clear()
-            status_data = db.query(Mahasiswa.status, func.count(Mahasiswa.id)).group_by(Mahasiswa.status).all()
-            
-            color_map_status = {
-                "Aktif": QColor("#28B463"), "Cuti": QColor("#F1C40F"),
-                "Lulus": QColor("#3498DB"), "DO": QColor("#E74C3C"), "Keluar": QColor("#E74C3C")
-            }
-            total_status = sum([count for _, count in status_data])
-            
-            for status, count in status_data:
-                pct = (count / total_status) * 100 if total_status > 0 else 0
-                label = f"{status}: {count} ({pct:.1f}%)"
-                slice_ = self.status_series.append(label, count)
-                if status in color_map_status: slice_.setColor(color_map_status[status])
-                if status == "Aktif":
-                    slice_.setExploded(True); slice_.setExplodeDistanceFactor(0.1)
-                slice_.setLabelVisible(True)
+            stat_data = db.query(Mahasiswa.status, func.count(Mahasiswa.id)).group_by(Mahasiswa.status).all()
+            col_map = {"Aktif": "#28B463", "Cuti": "#F1C40F", "Lulus": "#3498DB", "DO": "#E74C3C", "Keluar": "#E74C3C"}
+            tot_stat = sum([c for _, c in stat_data])
+            for st, cnt in stat_data:
+                pct = (cnt/tot_stat)*100 if tot_stat else 0
+                sl = self.status_series.append(f"{st}: {cnt} ({pct:.1f}%)", cnt)
+                if st in col_map: sl.setColor(QColor(col_map[st]))
+                if st == "Aktif": sl.setExploded(True); sl.setExplodeDistanceFactor(0.1)
+                sl.setLabelVisible(True)
 
-            # === 5. UPDATE GRAFIK GENDER (STACKED BAR) ===
+            # === 5. GRAFIK GENDER (STACKED BAR) ===
             self.gender_series.clear()
-            raw_gender = db.query(Mahasiswa.program_studi, Mahasiswa.gender, func.count(Mahasiswa.id))\
-                           .filter(Mahasiswa.status == 'Aktif')\
-                           .group_by(Mahasiswa.program_studi, Mahasiswa.gender).all()
-
-            gender_map = defaultdict(lambda: {'L': 0, 'P': 0})
-            all_prodi_gender = set()
-            for prodi, gender, count in raw_gender:
-                if prodi:
-                    gender_map[prodi][gender] = count
-                    all_prodi_gender.add(prodi)
+            raw_gen = db.query(Mahasiswa.program_studi, Mahasiswa.gender, func.count(Mahasiswa.id))\
+                        .filter(Mahasiswa.status == 'Aktif').group_by(Mahasiswa.program_studi, Mahasiswa.gender).all()
+            gen_map = defaultdict(lambda: {'L':0, 'P':0}); cats_gen = set()
+            for p, g, c in raw_gen: 
+                if p: gen_map[p][g] = c; cats_gen.add(p)
             
-            cat_gender = sorted(list(all_prodi_gender))
+            sorted_cats = sorted(list(cats_gen))
             set_l = QBarSet("Laki-laki"); set_l.setColor(QColor("#3498DB")); set_l.setLabelColor(Qt.white)
             set_p = QBarSet("Perempuan"); set_p.setColor(QColor("#E91E63")); set_p.setLabelColor(Qt.white)
-
-            if cat_gender:
-                for prodi in cat_gender:
-                    set_l.append(gender_map[prodi]['L'])
-                    set_p.append(gender_map[prodi]['P'])
-            else:
-                set_l.append(0); set_p.append(0); cat_gender.append("-")
-
-            self.gender_series.append(set_l); self.gender_series.append(set_p)
-            self.gender_axis_x.clear(); self.gender_axis_x.append(cat_gender)
             
+            if sorted_cats:
+                for p in sorted_cats: set_l.append(gen_map[p]['L']); set_p.append(gen_map[p]['P'])
+            else: set_l.append(0); set_p.append(0); sorted_cats.append("-")
+            
+            self.gender_series.append(set_l); self.gender_series.append(set_p)
+            self.gender_axis_x.clear(); self.gender_axis_x.append(sorted_cats)
             max_gen = 0
-            for prodi in cat_gender:
-                tot = gender_map[prodi]['L'] + gender_map[prodi]['P']
-                if tot > max_gen: max_gen = tot
+            for p in sorted_cats: 
+                t = gen_map[p]['L'] + gen_map[p]['P']
+                if t > max_gen: max_gen = t
             self.gender_axis_y.setRange(0, max(10, max_gen + 5))
+
+            # === 6. GRAFIK SEBARAN IPK (BARU - HISTOGRAM STYLE) ===
+            self.dist_series.clear()
+            
+            # Ambil data nilai per mahasiswa untuk hitung IPK individu
+            raw_scores = db.query(Nilai.mahasiswa_id, Nilai.nilai_angka, Matakuliah.sks)\
+                           .join(Matakuliah).filter(Mahasiswa.status == 'Aktif').all()
+            
+            # Hitung IPK per mahasiswa: {mhs_id: [total_poin, total_sks]}
+            student_scores = defaultdict(lambda: [0, 0])
+            for mid, val, sks in raw_scores:
+                student_scores[mid][0] += val * sks
+                student_scores[mid][1] += sks
+            
+            # Bucket: <2.00, 2.00-2.75, 2.76-3.50, 3.51-4.00
+            buckets = [0, 0, 0, 0]
+            for data in student_scores.values():
+                if data[1] > 0:
+                    ipk = data[0] / data[1]
+                    if ipk < 2.00: buckets[0] += 1
+                    elif ipk <= 2.75: buckets[1] += 1
+                    elif ipk <= 3.50: buckets[2] += 1
+                    else: buckets[3] += 1 # Cum Laude area
+            
+            bar_dist = QBarSet("Mahasiswa")
+            bar_dist.setColor(QColor("#9B59B6")) # Warna Ungu (Violet)
+            bar_dist.setLabelColor(Qt.white)
+            
+            # --- PERBAIKAN: Definisi ulang label_font di sini ---
+            label_font = QFont("Arial", 11)
+            label_font.setBold(True)
+            bar_dist.setLabelFont(label_font)
+            # ----------------------------------------------------
+            
+            for b in buckets:
+                bar_dist.append(b)
+                
+            self.dist_series.append(bar_dist)
+            self.dist_axis_y.setRange(0, max(10, max(buckets) + 5))
 
         except Exception as e:
             print(f"Gagal memuat statistik dashboard: {e}")
@@ -2681,15 +2686,49 @@ class MainWidget(QWidget):
         chart_view.setMinimumHeight(400)
         return chart_view
 
+    # --- FUNGSI BARU: MEMBUAT GRAFIK SEBARAN RANGE IPK ---
+    def create_gpa_dist_chart(self):
+        self.dist_series = QBarSeries()
+        self.dist_series.setLabelsVisible(True)
+        self.dist_series.setLabelsPosition(QBarSeries.LabelsCenter) # Label di tengah
+
+        chart = QChart()
+        chart.addSeries(self.dist_series)
+        chart.setTitle("Sebaran Range IPK Mahasiswa")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        
+        # Kategori Range IPK
+        self.dist_axis_x = QBarCategoryAxis()
+        self.dist_axis_x.append(["< 2.00", "2.00 - 2.75", "2.76 - 3.50", "3.51 - 4.00"])
+        self.dist_axis_x.setTitleText("Range IPK")
+        self.dist_axis_x.setGridLineVisible(False)
+        chart.addAxis(self.dist_axis_x, Qt.AlignBottom)
+        self.dist_series.attachAxis(self.dist_axis_x)
+
+        # Sumbu Y (Jumlah Mahasiswa)
+        self.dist_axis_y = QValueAxis()
+        self.dist_axis_y.setTitleText("Jumlah Mahasiswa")
+        self.dist_axis_y.setLabelFormat("%d") 
+        chart.addAxis(self.dist_axis_y, Qt.AlignLeft)
+        self.dist_series.attachAxis(self.dist_axis_y)
+
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignBottom)
+
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setMinimumHeight(400)
+        
+        return chart_view
+
     def create_home_page(self):
         content_widget = QWidget()
         content_widget.setStyleSheet("QWidget { background-color: #FFFFFF; } QLabel { background-color: transparent; color: #000000; }")
         content_layout = QVBoxLayout(content_widget)
         content_layout.setSpacing(20); content_layout.setAlignment(Qt.AlignTop); content_layout.setContentsMargins(30, 30, 30, 30)
 
-        # --- Header & Stats ---
-        self.welcome_label = QLabel("Selamat Datang!")
-        self.welcome_label.setAlignment(Qt.AlignCenter); self.welcome_label.setStyleSheet("font-size: 24px; font-weight: 600; padding-bottom: 20px;")
+        # --- Header & Stats Teks ---
+        self.welcome_label = QLabel("Selamat Datang!"); self.welcome_label.setAlignment(Qt.AlignCenter); self.welcome_label.setStyleSheet("font-size: 24px; font-weight: 600; padding-bottom: 20px;")
         content_layout.addWidget(self.welcome_label)
 
         stats_layout = QHBoxLayout(); stats_layout.setSpacing(30); stats_layout.setAlignment(Qt.AlignCenter)
@@ -2700,42 +2739,45 @@ class MainWidget(QWidget):
         stats_layout.addWidget(self.label_stats_mhs); stats_layout.addWidget(self.label_stats_dosen); stats_layout.addWidget(self.label_stats_prodi)
         content_layout.addLayout(stats_layout)
 
-        # --- Area Grafik (Layout 1-2-1) ---
-        charts_layout = QVBoxLayout()
-        charts_layout.setSpacing(40)
+        # --- AREA GRAFIK ---
+        charts_layout = QVBoxLayout(); charts_layout.setSpacing(40)
 
-        # 1. ATAS: Tren (Line)
+        # 1. Tren Mahasiswa (Full Width)
         self.chart_view = self.create_trend_chart()
         self.chart_view.setMinimumHeight(400)
         charts_layout.addWidget(self.chart_view)
         
-        # 2. TENGAH: IPK (Kiri) & Status (Kanan)
-        row_middle_layout = QHBoxLayout()
-        row_middle_layout.setSpacing(20)
-
-        self.gpa_chart_view = self.create_gpa_chart()
-        self.gpa_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        row_middle_layout.addWidget(self.gpa_chart_view)
-
-        self.status_chart_view = self.create_status_chart()
-        self.status_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        row_middle_layout.addWidget(self.status_chart_view)
-
-        charts_layout.addLayout(row_middle_layout)
-
-        # 3. BAWAH: Gender (Stacked Bar)
+        # 2. Komposisi Gender (Full Width)
         self.gender_chart_view = self.create_gender_chart()
         self.gender_chart_view.setMinimumHeight(400)
         charts_layout.addWidget(self.gender_chart_view)
+
+        # 3 & 4. Rata-rata IPK & Status (Berdampingan)
+        row_34 = QHBoxLayout(); row_34.setSpacing(20)
+        
+        # 3. Avg IPK (Kiri)
+        self.gpa_chart_view = self.create_gpa_chart()
+        self.gpa_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        row_34.addWidget(self.gpa_chart_view)
+
+        # 4. Status (Kanan)
+        self.status_chart_view = self.create_status_chart()
+        self.status_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        row_34.addWidget(self.status_chart_view)
+
+        charts_layout.addLayout(row_34)
+
+        # 5. Sebaran Range IPK (Full Width)
+        self.dist_chart_view = self.create_gpa_dist_chart()
+        self.dist_chart_view.setMinimumHeight(400)
+        charts_layout.addWidget(self.dist_chart_view)
 
         content_layout.addLayout(charts_layout)
         
         # --- Scroll Area ---
         from PySide6.QtWidgets import QScrollArea
         scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setWidget(content_widget)
-        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setWidgetResizable(True); scroll_area.setWidget(content_widget); scroll_area.setFrameShape(QFrame.NoFrame)
         
         return scroll_area
 
@@ -2825,5 +2867,5 @@ if __name__ == "__main__":
         
     app = QApplication(sys.argv)
     main_app_window = AppWindow()
-    main_app_window.showMaximized() 
+    main_app_window.showMaximized()  
     sys.exit(app.exec())
