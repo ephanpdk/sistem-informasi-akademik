@@ -31,7 +31,10 @@ from PySide6.QtWidgets import (
 )
 # --- IMPORT BARU UNTUK GRAFIK ---
 try:
-    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QScatterSeries
+    from PySide6.QtCharts import (
+        QChart, QChartView, QLineSeries, QValueAxis, 
+        QScatterSeries, QBarSeries, QBarSet, QBarCategoryAxis
+    )
 except ImportError:
     print("="*50)
     print("ERROR: Modul PySide6.QtCharts tidak ditemukan.")
@@ -2320,7 +2323,6 @@ class MainWidget(QWidget):
         self.chart_view.setMinimumHeight(400)
         self.chart_view.setContentsMargins(10, 10, 30, 10)
 
-
     
     def create_nav_frame(self, user_role): 
         nav_frame = QFrame()
@@ -2420,7 +2422,6 @@ class MainWidget(QWidget):
             print(f"Gagal memuat data mahasiswa: {e}")
         self.page_stack.setCurrentIndex(1)
 
-  # --- FUNGSI BARU: MEMBUAT GRAFIK GARIS DENGAN TEKS DISESUAIKAN ---
     def create_trend_chart(self):
         # Warna Tema Biru
         theme_color = QColor("#0078D7")
@@ -2488,17 +2489,13 @@ class MainWidget(QWidget):
         return chart_view
     
 
-   # --- FUNGSI DIPERBARUI: Mengisi data teks DAN data grafik ---
     def update_dashboard_stats(self):
-        if not hasattr(self, 'label_stats_mhs'):
-            return
-
-        if 'SessionLocal' not in globals():
+        if not hasattr(self, 'label_stats_mhs') or 'SessionLocal' not in globals():
             return
         
         db = SessionLocal()
         try:
-            # --- Query 1: Statistik Teks ---
+            # 1. Statistik Teks
             count_mhs = db.query(func.count(Mahasiswa.id)).scalar() or 0
             count_dosen = db.query(func.count(Dosen.id)).scalar() or 0
             count_prodi = db.query(func.count(Mahasiswa.program_studi.distinct())).scalar() or 0
@@ -2507,91 +2504,149 @@ class MainWidget(QWidget):
             self.label_stats_dosen.setText(f"Total Dosen: {count_dosen}")
             self.label_stats_prodi.setText(f"Total Program Studi: {count_prodi}")
             
-            # --- Query 2: Statistik Grafik Tren ---
+            # 2. Grafik Tren Mahasiswa (Line Chart)
             self.trend_series.clear()
-            self.label_series.clear() # Bersihkan juga seri label
+            self.label_series.clear()
             
-            trend_data = db.query(
-                                Mahasiswa.tahun_masuk, 
-                                func.count(Mahasiswa.id)
-                           ) \
-                           .filter(Mahasiswa.status == 'Aktif') \
-                           .filter(Mahasiswa.tahun_masuk.between(2021, 2025)) \
-                           .group_by(Mahasiswa.tahun_masuk) \
-                           .order_by(Mahasiswa.tahun_masuk) \
-                           .all()
+            trend_data = db.query(Mahasiswa.tahun_masuk, func.count(Mahasiswa.id))\
+                           .filter(Mahasiswa.status == 'Aktif')\
+                           .filter(Mahasiswa.tahun_masuk.between(2021, 2025))\
+                           .group_by(Mahasiswa.tahun_masuk)\
+                           .order_by(Mahasiswa.tahun_masuk).all()
             
-            # Setting Range Sumbu X
-            start_view = 2020
-            end_view = 2026
-            self.trend_axis_x.setRange(start_view, end_view)
-            self.trend_axis_x.setTickCount((end_view - start_view) + 1)
+            self.trend_axis_x.setRange(2020, 2026)
+            self.trend_axis_x.setTickCount(7)
 
             if trend_data:
                 max_count = 0
-                
-                # OFFSET UNTUK TEKS (Agar naik ke atas)
-                # Nilai ini menentukan seberapa tinggi teks naik. 
-                # Sesuaikan 1.5 jika ingin lebih tinggi/rendah.
-                text_offset = 1.5 
-                
                 for tahun, jumlah in trend_data:
-                    # 1. Masukkan data asli ke grafik garis
                     self.trend_series.append(tahun, jumlah)
-                    
-                    # 2. Masukkan data dengan offset ke seri label (agar teks naik)
-                    self.label_series.append(tahun, jumlah + text_offset)
-                    
-                    if jumlah > max_count:
-                        max_count = jumlah
-                
-                # Tambahkan sedikit ruang lebih di atas agar teks label tertinggi tidak terpotong
-                self.trend_axis_y.setRange(0, max(10, max_count + (max_count * 0.1) + 5))
-            
+                    self.label_series.append(tahun, jumlah + 1.5)
+                    if jumlah > max_count: max_count = jumlah
+                self.trend_axis_y.setRange(0, max(10, max_count + 5))
             else:
-                current_year = datetime.now().year 
+                current_year = datetime.now().year
                 self.trend_series.append(current_year - 1, 0)
                 self.trend_series.append(current_year, 0)
                 self.trend_axis_y.setRange(0, 10)
 
+            # 3. Grafik Rata-rata IPK (Bar Chart)
+            self.gpa_series.clear()
+            
+            raw_data = db.query(
+                Mahasiswa.program_studi,
+                Nilai.nilai_angka,
+                Matakuliah.sks
+            ).join(Nilai, Mahasiswa.id == Nilai.mahasiswa_id)\
+             .join(Matakuliah, Nilai.matakuliah_id == Matakuliah.id)\
+             .filter(Mahasiswa.status == 'Aktif').all()
+
+            stats_prodi = defaultdict(lambda: [0.0, 0])
+            
+            for prodi, nilai_angka, sks in raw_data:
+                if prodi:
+                    stats_prodi[prodi][0] += (nilai_angka * sks)
+                    stats_prodi[prodi][1] += sks
+
+            # Styling Bar Chart
+            bar_set = QBarSet("Rata-rata IPK")
+            bar_set.setColor(QColor("#27AE60"))  # Emerald Green
+            bar_set.setLabelColor(Qt.white)      # Teks Putih
+            
+            label_font = QFont("Arial", 11)
+            label_font.setBold(True)
+            bar_set.setLabelFont(label_font)
+            
+            categories = []
+            
+            if stats_prodi:
+                for prodi, data in stats_prodi.items():
+                    total_points, total_sks = data
+                    avg_ipk = total_points / total_sks if total_sks > 0 else 0.0
+                    
+                    bar_set.append(round(avg_ipk, 2)) # Pembulatan 2 desimal
+                    categories.append(prodi)
+            else:
+                bar_set.append(0)
+                categories.append("-")
+
+            self.gpa_series.append(bar_set)
+            
+            self.gpa_axis_x.clear()
+            self.gpa_axis_x.append(categories)
+
         except Exception as e:
             print(f"Gagal memuat statistik dashboard: {e}")
         finally:
-            db.close()     
-    
-    # --- FUNGSI UNTUK MEMBUAT TAMPILAN HOME (DIROMBAK) ---
+            db.close()
+
+    # --- FUNGSI BARU: MEMBUAT GRAFIK BATANG RATA-RATA IPK ---
+    def create_gpa_chart(self):
+        # 1. Buat Bar Series
+        self.gpa_series = QBarSeries()
+        self.gpa_series.setLabelsVisible(True) 
+        
+        # --- PERUBAHAN: Posisi label di TENGAH (Center) ---
+        self.gpa_series.setLabelsPosition(QBarSeries.LabelsCenter) 
+        # --- AKHIR PERUBAHAN ---
+
+        # 2. Buat Chart
+        chart = QChart()
+        chart.addSeries(self.gpa_series)
+        chart.setTitle("Rata-rata IPK per Program Studi")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        chart.setMargins(QMargins(20, 10, 20, 10))
+
+        # 3. Sumbu X (Kategori Prodi)
+        self.gpa_axis_x = QBarCategoryAxis()
+        self.gpa_axis_x.setTitleText("Program Studi")
+        self.gpa_axis_x.setGridLineVisible(False) # Grid vertikal dimatikan agar bersih
+        
+        chart.addAxis(self.gpa_axis_x, Qt.AlignBottom)
+        self.gpa_series.attachAxis(self.gpa_axis_x)
+
+        # 4. Sumbu Y (Nilai IPK 0.0 - 4.0)
+        self.gpa_axis_y = QValueAxis()
+        self.gpa_axis_y.setTitleText("Rata-rata IPK")
+        self.gpa_axis_y.setRange(0, 4.0) 
+        self.gpa_axis_y.setLabelFormat("%.2f") 
+        chart.addAxis(self.gpa_axis_y, Qt.AlignLeft)
+        self.gpa_series.attachAxis(self.gpa_axis_y)
+
+        # 5. Legenda
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignBottom)
+
+        # 6. Widget Tampilan
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setMinimumHeight(400)
+        
+        return chart_view
+
     def create_home_page(self):
-        home_widget = QWidget()
-        
-        # --- PERUBAHAN: CSS dibersihkan, PADDING DIHAPUS dari CSS ---
-        # Kita menggunakan layout margin (setContentsMargins) di bawah, bukan CSS.
-        home_widget.setStyleSheet("""
-            QWidget { 
-                background-color: #FFFFFF; 
-            }
-            QLabel {
-                background-color: transparent; 
-                color: #000000; 
-            }
+        # 1. Buat Widget Konten (Wadah Utama)
+        content_widget = QWidget()
+        content_widget.setStyleSheet("""
+            QWidget { background-color: #FFFFFF; }
+            QLabel { background-color: transparent; color: #000000; }
         """)
-        # --- AKHIR PERUBAHAN ---
         
-        main_layout = QVBoxLayout(home_widget)
-        main_layout.setSpacing(20)
-        main_layout.setAlignment(Qt.AlignTop)
+        # Layout untuk konten di dalam scroll
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(20)
+        content_layout.setAlignment(Qt.AlignTop)
+        content_layout.setContentsMargins(30, 30, 30, 30)
 
-        # --- PERUBAHAN: Mengatur jarak pinggir menggunakan Layout System ---
-        # (Kiri, Atas, Kanan, Bawah) -> Memberi jarak 30px dari pinggir layar
-        main_layout.setContentsMargins(30, 30, 30, 30)
-        # --- AKHIR PERUBAHAN ---
-
-        # 1. Label Selamat Datang
+        # --- ISI KONTEN ---
+        
+        # A. Label Selamat Datang
         self.welcome_label = QLabel("Selamat Datang!")
         self.welcome_label.setAlignment(Qt.AlignCenter)
         self.welcome_label.setStyleSheet("font-size: 24px; font-weight: 600; padding-bottom: 20px;") 
-        main_layout.addWidget(self.welcome_label)
+        content_layout.addWidget(self.welcome_label)
 
-        # 2. Layout untuk Statistik Teks
+        # B. Layout Statistik Teks
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(30)
         stats_layout.setAlignment(Qt.AlignCenter)
@@ -2600,27 +2655,45 @@ class MainWidget(QWidget):
         
         self.label_stats_mhs = QLabel("Total Mahasiswa: 0")
         self.label_stats_mhs.setStyleSheet(stats_style)
-        
         self.label_stats_dosen = QLabel("Total Dosen: 0")
         self.label_stats_dosen.setStyleSheet(stats_style)
-        
         self.label_stats_prodi = QLabel("Total Program Studi: 0")
         self.label_stats_prodi.setStyleSheet(stats_style)
 
         stats_layout.addWidget(self.label_stats_mhs)
         stats_layout.addWidget(self.label_stats_dosen)
         stats_layout.addWidget(self.label_stats_prodi)
-        
-        main_layout.addLayout(stats_layout) 
+        content_layout.addLayout(stats_layout) 
 
-        # 3. Buat dan tambahkan Grafik Tren
+        # C. Area Grafik (Vertikal)
+        charts_layout = QVBoxLayout()
+        charts_layout.setSpacing(40)
+
+        # Grafik 1: Tren Mahasiswa
         self.chart_view = self.create_trend_chart()
+        # Kita set tinggi tetap (fixed height) agar scroll area tahu seberapa panjang kontennya
+        self.chart_view.setMinimumHeight(400) 
+        charts_layout.addWidget(self.chart_view)
         
-        # Set agar grafik mengambil semua sisa ruang
-        self.chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        main_layout.addWidget(self.chart_view) 
+        # Grafik 2: Rata-rata IPK
+        self.gpa_chart_view = self.create_gpa_chart()
+        self.gpa_chart_view.setMinimumHeight(400)
+        charts_layout.addWidget(self.gpa_chart_view)
+
+        content_layout.addLayout(charts_layout)
         
-        return home_widget
+        # --- PENERAPAN SCROLL AREA ---
+        
+        from PySide6.QtWidgets import QScrollArea # Import lokal jika belum ada di atas
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True) # Agar lebar konten mengikuti lebar jendela
+        scroll_area.setWidget(content_widget) # Masukkan konten ke dalam scroll area
+        
+        # Hilangkan border scroll area agar terlihat menyatu
+        scroll_area.setFrameShape(QFrame.NoFrame) 
+        
+        return scroll_area
 
     def handle_logout(self):
         msg_box = QMessageBox()
