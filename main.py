@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from sqlalchemy import func
 from PySide6.QtCore import Qt, Signal, QDate, QSortFilterProxyModel, QMargins
-from PySide6.QtGui import QIntValidator, QStandardItemModel, QStandardItem, QPainter
+from PySide6.QtGui import QIntValidator, QStandardItemModel, QStandardItem, QPainter, QFont, QColor
 from PySide6.QtWidgets import (
     QApplication, 
     QWidget, 
@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 # --- IMPORT BARU UNTUK GRAFIK ---
 try:
-    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
+    from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis, QScatterSeries
 except ImportError:
     print("="*50)
     print("ERROR: Modul PySide6.QtCharts tidak ditemukan.")
@@ -2420,57 +2420,80 @@ class MainWidget(QWidget):
             print(f"Gagal memuat data mahasiswa: {e}")
         self.page_stack.setCurrentIndex(1)
 
+  # --- FUNGSI BARU: MEMBUAT GRAFIK GARIS DENGAN TEKS DISESUAIKAN ---
     def create_trend_chart(self):
-        # 1. Buat Seri Data (garis)
+        # Warna Tema Biru
+        theme_color = QColor("#0078D7")
+
+        # 1. Buat Seri Data UTAMA (Garis & Titik)
         self.trend_series = QLineSeries()
         self.trend_series.setName("Mahasiswa Aktif")
         self.trend_series.setPointsVisible(True)
-        self.trend_series.setMarkerSize(5.0) 
+        self.trend_series.setMarkerSize(6.0)
+        self.trend_series.setColor(theme_color) # Warna Garis Biru
 
-        # 2. Buat Chart dan tambahkan Seri
+        # 2. Buat Seri Data BAYANGAN (Khusus untuk Label Teks)
+        # Ini digunakan agar teks bisa digeser ke atas sedikit
+        self.label_series = QScatterSeries()
+        self.label_series.setMarkerSize(1.0) # Ukuran marker sangat kecil (hampir tak terlihat)
+        self.label_series.setColor(Qt.transparent) # Marker transparan
+        self.label_series.setPointLabelsVisible(True) # Tampilkan Label
+        self.label_series.setPointLabelsFormat("@yPoint") # Format Angka
+        self.label_series.setPointLabelsColor(theme_color) # Warna Teks Biru (Sesuai Grafik)
+        self.label_series.setPointLabelsClipping(False)
+
+        # Atur Font Label
+        label_font = QFont("Arial", 10)
+        label_font.setBold(True)
+        self.label_series.setPointLabelsFont(label_font)
+
+        # 3. Buat Chart dan tambahkan kedua Seri
         chart = QChart()
         chart.addSeries(self.trend_series)
+        chart.addSeries(self.label_series) # Tambahkan seri label
+        
         chart.setTitle("Tren Jumlah Mahasiswa Aktif per Tahun Masuk")
         chart.setAnimationOptions(QChart.SeriesAnimations)
+        chart.setMargins(QMargins(20, 10, 20, 10))
+        
+        # Sembunyikan legenda untuk seri bayangan agar tidak double
+        chart.legend().markers(self.label_series)[0].setVisible(False)
 
-        # --- PERUBAHAN: Memberi margin internal agar label tidak terpotong ---
-        # (Kiri, Atas, Kanan, Bawah)
-        chart.setMargins(QMargins(20, 10, 20, 10)) 
-        # --- AKHIR PERUBAHAN ---
-
-        # 3. Buat Sumbu X (Tahun)
+        # 4. Buat Sumbu X (Tahun)
         self.trend_axis_x = QValueAxis()
         self.trend_axis_x.setTitleText("Tahun Masuk")
         self.trend_axis_x.setLabelFormat("%d")
         
         chart.addAxis(self.trend_axis_x, Qt.AlignBottom)
         self.trend_series.attachAxis(self.trend_axis_x)
+        self.label_series.attachAxis(self.trend_axis_x) # Attach juga seri label
 
-        # 4. Buat Sumbu Y (Jumlah)
+        # 5. Buat Sumbu Y (Jumlah)
         self.trend_axis_y = QValueAxis()
         self.trend_axis_y.setTitleText("Jumlah Mahasiswa")
         self.trend_axis_y.setLabelFormat("%d")
+        
         chart.addAxis(self.trend_axis_y, Qt.AlignLeft)
         self.trend_series.attachAxis(self.trend_axis_y)
+        self.label_series.attachAxis(self.trend_axis_y) # Attach juga seri label
 
-        # 5. Tampilkan Legenda
+        # 6. Tampilkan Legenda
         chart.legend().setVisible(True)
         chart.legend().setAlignment(Qt.AlignBottom)
 
-        # 6. Buat Widget Penampil Chart
+        # 7. Buat Widget Penampil Chart
         chart_view = QChartView(chart)
         chart_view.setRenderHint(QPainter.Antialiasing)
         
         return chart_view
+    
 
+   # --- FUNGSI DIPERBARUI: Mengisi data teks DAN data grafik ---
     def update_dashboard_stats(self):
-        # Memastikan label sudah dibuat sebelum diupdate
         if not hasattr(self, 'label_stats_mhs'):
-            print("Dashboard belum siap, update dibatalkan.")
             return
 
         if 'SessionLocal' not in globals():
-            print("Dashboard: SessionLocal not found.")
             return
         
         db = SessionLocal()
@@ -2486,8 +2509,8 @@ class MainWidget(QWidget):
             
             # --- Query 2: Statistik Grafik Tren ---
             self.trend_series.clear()
+            self.label_series.clear() # Bersihkan juga seri label
             
-            # Ambil data 2021 s/d 2025
             trend_data = db.query(
                                 Mahasiswa.tahun_masuk, 
                                 func.count(Mahasiswa.id)
@@ -2498,36 +2521,34 @@ class MainWidget(QWidget):
                            .order_by(Mahasiswa.tahun_masuk) \
                            .all()
             
-            # --- PERBAIKAN SUMBU X AGAR DATA SESUAI DAN RAPI ---
-            # Kita atur range visual dari 2020 sampai 2026.
-            # Ini memberi ruang 1 tahun di kiri (sebelum 2021) dan 1 tahun di kanan (setelah 2025).
+            # Setting Range Sumbu X
             start_view = 2020
             end_view = 2026
-            
             self.trend_axis_x.setRange(start_view, end_view)
-            
-            # Hitung jumlah tick agar SETIAP tahun muncul labelnya.
-            # Rumus: (Tahun Akhir - Tahun Awal) + 1
-            # Contoh: (2026 - 2020) + 1 = 7 Tick (2020, 21, 22, 23, 24, 25, 26)
-            tick_count = (end_view - start_view) + 1
-            self.trend_axis_x.setTickCount(tick_count)
-            # --- AKHIR PERBAIKAN ---
+            self.trend_axis_x.setTickCount((end_view - start_view) + 1)
 
             if trend_data:
-                # Cari nilai tertinggi untuk batas atas sumbu Y
                 max_count = 0
                 
-                # Masukkan data ke seri
+                # OFFSET UNTUK TEKS (Agar naik ke atas)
+                # Nilai ini menentukan seberapa tinggi teks naik. 
+                # Sesuaikan 1.5 jika ingin lebih tinggi/rendah.
+                text_offset = 1.5 
+                
                 for tahun, jumlah in trend_data:
+                    # 1. Masukkan data asli ke grafik garis
                     self.trend_series.append(tahun, jumlah)
+                    
+                    # 2. Masukkan data dengan offset ke seri label (agar teks naik)
+                    self.label_series.append(tahun, jumlah + text_offset)
+                    
                     if jumlah > max_count:
                         max_count = jumlah
                 
-                # Set Sumbu Y agar grafik tidak mentok atas
-                self.trend_axis_y.setRange(0, max(10, max_count + (max_count * 0.1) + 2))
+                # Tambahkan sedikit ruang lebih di atas agar teks label tertinggi tidak terpotong
+                self.trend_axis_y.setRange(0, max(10, max_count + (max_count * 0.1) + 5))
             
             else:
-                # Jika tidak ada data, tampilkan data dummy (flat line)
                 current_year = datetime.now().year 
                 self.trend_series.append(current_year - 1, 0)
                 self.trend_series.append(current_year, 0)
@@ -2535,12 +2556,8 @@ class MainWidget(QWidget):
 
         except Exception as e:
             print(f"Gagal memuat statistik dashboard: {e}")
-            self.label_stats_mhs.setText("Total Mahasiswa: 0")
-            self.label_stats_dosen.setText("Total Dosen: 0")
-            self.label_stats_prodi.setText("Total Program Studi: 0")
         finally:
-            db.close()
-            
+            db.close()     
     
     # --- FUNGSI UNTUK MEMBUAT TAMPILAN HOME (DIROMBAK) ---
     def create_home_page(self):
