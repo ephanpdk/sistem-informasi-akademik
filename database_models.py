@@ -37,8 +37,6 @@ class Dosen(Base):
     jabatan_akademik = Column(String(50), nullable=True)
     # SQL: email varchar(100)
     email = Column(String(100), unique=True, nullable=False)
-    # SQL: status varchar(20)
-    status = Column(String(20), default="Aktif")
 
     # Relasi Balik: Agar bisa memanggil dosen.mahasiswa_bimbingan
     # Ini akan berisi list semua mahasiswa yang dibimbing dosen ini

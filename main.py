@@ -731,7 +731,6 @@ class MahasiswaWidget(QWidget):
         self.input_gender.setCurrentIndex(0) 
         self.input_tahun_masuk.clear()
         self.input_tgl_lahir.setDate(QDate.currentDate())
-        self.input_status.setCurrentIndex(0)
         self.form_frame.setEnabled(False) 
         self.input_nim.setReadOnly(False) 
 
@@ -810,14 +809,11 @@ class DosenWidget(QWidget):
         self.input_jabatan = QComboBox()
         self.input_jabatan.addItems(self.JABATAN_LIST)
         self.input_email = QLineEdit()
-        self.input_status = QComboBox()
-        self.input_status.addItems(["Aktif", "Cuti", "Pensiun"])
         form_layout.addRow(QLabel("NIDN/NIP:"), self.input_nidn)
         form_layout.addRow(QLabel("Nama Lengkap:"), self.input_nama)
         form_layout.addRow(QLabel("Gender (L/P):"), self.input_gender)
         form_layout.addRow(QLabel("Jabatan Akademik:"), self.input_jabatan)
         form_layout.addRow(QLabel("Email:"), self.input_email)
-        form_layout.addRow(QLabel("Status:"), self.input_status)
         btn_layout = QHBoxLayout()
         self.btn_update = QPushButton("Update Data") 
         self.btn_update.setObjectName("btn_simpan") 
@@ -850,10 +846,10 @@ class DosenWidget(QWidget):
         self.search_input.setPlaceholderText("Cari berdasarkan NIDN atau Nama...")
         table_layout.addWidget(self.search_input) 
         self.table_dsn = QTableWidget() 
-        self.table_dsn.setColumnCount(8) 
+        self.table_dsn.setColumnCount(7) 
         self.table_dsn.setHorizontalHeaderLabels([
             "#", "ID", "NIDN", "Nama", 
-            "Gender", "Jabatan Akademik", "Email", "Status"
+            "Gender", "Jabatan Akademik", "Email" 
         ])
         self.table_dsn.verticalHeader().hide()
         self.table_dsn.setColumnHidden(1, True) 
@@ -1007,7 +1003,6 @@ class DosenWidget(QWidget):
                 self.table_dsn.setItem(row_position, 4, QTableWidgetItem(dsn.gender)) # Gender
                 self.table_dsn.setItem(row_position, 5, QTableWidgetItem(dsn.jabatan_akademik)) # Jabatan
                 self.table_dsn.setItem(row_position, 6, QTableWidgetItem(dsn.email)) # Email
-                self.table_dsn.setItem(row_position, 7, QTableWidgetItem(dsn.status)) # Status
         except Exception as e:
             self.show_message("Error", f"Gagal memuat data dosen: {e}")
         finally:
@@ -1022,7 +1017,6 @@ class DosenWidget(QWidget):
         gender = self.input_gender.currentText()
         jabatan = self.input_jabatan.currentText()
         email = self.input_email.text()
-        status = self.input_status.currentText()
         if not nidn or not nama or not email:
             self.show_message("Error", "NIDN, Nama, dan Email tidak boleh kosong.")
             return
@@ -1055,7 +1049,6 @@ class DosenWidget(QWidget):
                 dsn.gender = gender
                 dsn.jabatan_akademik = jabatan
                 dsn.email = email
-                dsn.status = status
                 self.show_message("Sukses", f"Data {nama} berhasil diperbarui.")
                 db_session.commit()
             else:
@@ -1222,14 +1215,12 @@ class DosenWidget(QWidget):
         gender = self.table_dsn.item(row, 4).text() 
         jabatan = self.table_dsn.item(row, 5).text() 
         email = self.table_dsn.item(row, 6).text()
-        status = self.table_dsn.item(row, 7).text()
         self.selected_dosen_id = dsn_id
         self.input_nidn.setText(nidn)
         self.input_nama.setText(nama)
         self.input_gender.setCurrentText(gender)
         self.input_jabatan.setCurrentText(jabatan)
         self.input_email.setText(email)
-        self.input_status.setCurrentText(status)
 
     def show_message(self, title, message):
         msg_box = QMessageBox()
@@ -2440,8 +2431,8 @@ class MainWidget(QWidget):
         self.chart_view.setMinimumWidth(1000)
         self.chart_view.setMinimumHeight(400)
         self.chart_view.setContentsMargins(10, 10, 30, 10)
-        self.audit_page = AuditLogWidget()                      # <-- Widget Baru
-        self.page_stack.addWidget(self.audit_page) # Indeks misal 6
+        self.audit_page = AuditLogWidget()                      
+        self.page_stack.addWidget(self.audit_page) 
 
     
     def create_nav_frame(self, user_role): 
@@ -2479,7 +2470,6 @@ class MainWidget(QWidget):
         self.btn_audit = QPushButton("Audit Log")
         self.btn_audit.clicked.connect(self.show_audit_page)
         
-        nav_layout.addWidget(self.btn_audit)
         nav_layout.addWidget(self.btn_home)
         nav_layout.addWidget(self.btn_mhs)
         nav_layout.addWidget(self.btn_dosen)
@@ -2487,6 +2477,7 @@ class MainWidget(QWidget):
         nav_layout.addWidget(self.btn_nilai) 
         nav_layout.addWidget(self.btn_pengguna) 
         nav_layout.addStretch() 
+        nav_layout.addWidget(self.btn_audit)
         nav_layout.addWidget(self.btn_logout)
         
 
