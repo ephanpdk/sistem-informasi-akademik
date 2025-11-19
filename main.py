@@ -222,7 +222,26 @@ class MahasiswaWidget(QWidget):
         self.input_tgl_lahir.setDisplayFormat("dd/MM/yyyy")
         self.input_status = QComboBox()
         self.input_status.addItems(["Aktif", "Cuti", "Lulus", "DO"])
+        self.input_dosen_wali = QComboBox()
+        self.input_dosen_wali.setEditable(True)
+        self.input_dosen_wali.setInsertPolicy(QComboBox.NoInsert)
+        self.input_dosen_wali.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.input_dosen_wali.completer().setFilterMode(Qt.MatchContains) 
+        completer_popup = self.input_dosen_wali.completer().popup()
+        completer_popup.setStyleSheet("""
+            QListView {
+                background-color: #FFFFFF;
+                color: #000000;
+                border: 1px solid #E0E0E0;
+                font-size: 14px;
+            }
+            QListView::item:selected {
+                background-color: #0078D7;
+                color: #FFFFFF;
+            }
+        """)
         
+        self.input_dosen_wali.addItem("-- Pilih Dosen Wali --", None)
         form_layout.addRow(QLabel("NIM:"), self.input_nim)
         form_layout.addRow(QLabel("Nama Lengkap:"), self.input_nama)
         form_layout.addRow(QLabel("Program Studi:"), self.input_prodi) 
@@ -230,6 +249,7 @@ class MahasiswaWidget(QWidget):
         form_layout.addRow(QLabel("Tahun Masuk:"), self.input_tahun_masuk)
         form_layout.addRow(QLabel("Tanggal Lahir:"), self.input_tgl_lahir)
         form_layout.addRow(QLabel("Status:"), self.input_status)
+        form_layout.addRow(QLabel("Dosen Wali:"), self.input_dosen_wali)
         
         btn_layout = QHBoxLayout()
         self.btn_update = QPushButton("Update Data") 
@@ -266,11 +286,21 @@ class MahasiswaWidget(QWidget):
         table_layout.addWidget(self.search_input) 
         
         self.table_mhs = QTableWidget()
-        self.table_mhs.setColumnCount(9) 
+        header = self.table_mhs.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Kolom No: Sesuai isi
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # NIM: Sesuai isi
+        header.setSectionResizeMode(3, QHeaderView.Stretch)          # Nama: MELAR (Prioritas)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # Prodi: Sesuai isi (atau Stretch kalau nama prodi panjang)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents) # Gender: Sesuai isi (kecil)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents) # Tahun: Sesuai isi
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents) # Tgl Lahir
+        header.setSectionResizeMode(8, QHeaderView.ResizeToContents) # Status
+        header.setSectionResizeMode(9, QHeaderView.Stretch)          # Dosen Wali: MELAR (Prioritas)
+        self.table_mhs.setColumnCount(10) 
         self.table_mhs.setHorizontalHeaderLabels([
             "#"
             , "ID", "NIM", "Nama", "Program Studi", 
-            "Gender", "Tahun Masuk", "Tgl Lahir", "Status"
+            "Gender", "Tahun Masuk", "Tgl Lahir", "Status", "Dosen Wali"
         ])
         self.table_mhs.verticalHeader().hide()
         self.table_mhs.setColumnHidden(1, True) 
@@ -291,6 +321,7 @@ class MahasiswaWidget(QWidget):
         self.btn_hapus.clicked.connect(self.delete_data)
         self.table_mhs.itemClicked.connect(self.table_row_clicked)
         self.search_input.textChanged.connect(self.filter_table)
+        self.load_dosen_options()
         self.applyStyles()
 
     def applyStyles(self):
@@ -363,6 +394,15 @@ class MahasiswaWidget(QWidget):
                 selection-color: #FFFFFF; 
                 outline: 0px; 
             }
+            QListView {
+                color: #000000;
+                background-color: #FFFFFF;
+                border: 1px solid #E0E0E0;
+            }
+            QListView::item:selected {
+                background-color: #0078D7;
+                color: #FFFFFF;
+            }
             QCalendarWidget {
                 background-color: #FFFFFF;
                 border: 1px solid #E0E0E0;
@@ -402,6 +442,23 @@ class MahasiswaWidget(QWidget):
                     self.table_mhs.setRowHidden(row, False)
                 else:
                     self.table_mhs.setRowHidden(row, True)
+    def load_dosen_options(self):
+        self.input_dosen_wali.clear()
+        self.input_dosen_wali.addItem("-- Pilih Dosen Wali --", None)
+        
+        if 'SessionLocal' not in globals(): return
+        
+        db = SessionLocal()
+        try:
+            # Ambil dosen yang statusnya aktif
+            dosen_list = db.query(Dosen).filter(Dosen.status == 'Aktif').all()
+            for d in dosen_list:
+                # Simpan ID dosen sebagai userData (parameter kedua)
+                self.input_dosen_wali.addItem(f"{d.nama}", d.id)
+        except Exception as e:
+            print(f"Error loading dosen: {e}")
+        finally:
+            db.close()
     
     def load_data(self):
         print("Memuat data mahasiswa...")
@@ -427,6 +484,8 @@ class MahasiswaWidget(QWidget):
                 self.table_mhs.setItem(row_position, 6, QTableWidgetItem(str(mhs.tahun_masuk))) # Tahun Masuk (indeks 6)
                 self.table_mhs.setItem(row_position, 7, QTableWidgetItem(tgl_lahir_str)) # Tgl Lahir (indeks 7)
                 self.table_mhs.setItem(row_position, 8, QTableWidgetItem(mhs.status)) # Status (indeks 8)
+                nama_doswal = mhs.dosen_wali.nama if mhs.dosen_wali else "-"
+                self.table_mhs.setItem(row_position, 9, QTableWidgetItem(nama_doswal))
         except Exception as e:
             self.show_message("Error", f"Gagal memuat data: {e}")
         finally:
@@ -447,6 +506,7 @@ class MahasiswaWidget(QWidget):
             return
         tanggal_lahir = self.input_tgl_lahir.date().toPython() 
         status = self.input_status.currentText()
+        dosen_wali_id = self.input_dosen_wali.currentData()
         
         if not nim or not nama or not prodi:
             self.show_message("Error", "NIM, Nama, dan Program Studi tidak boleh kosong.")
@@ -473,6 +533,7 @@ class MahasiswaWidget(QWidget):
                 mhs.tahun_masuk = tahun_masuk
                 mhs.tanggal_lahir = tanggal_lahir
                 mhs.status = status
+                mhs.dosen_wali_id = dosen_wali_id
                 self.show_message("Sukses", f"Data {nama} berhasil diperbarui.")
                 db_session.commit()
             else:
@@ -649,6 +710,7 @@ class MahasiswaWidget(QWidget):
         tahun_masuk = self.table_mhs.item(row, 6).text() 
         tgl_lahir_str = self.table_mhs.item(row, 7).text() 
         status = self.table_mhs.item(row, 8).text() 
+        dosen_wali_nama = self.table_mhs.item(row, 9).text()
         
         try:
             tanggal_lahir = QDate.fromString(tgl_lahir_str, "dd/MM/yyyy")
@@ -663,6 +725,12 @@ class MahasiswaWidget(QWidget):
         self.input_tahun_masuk.setText(tahun_masuk)
         self.input_tgl_lahir.setDate(tanggal_lahir)
         self.input_status.setCurrentText(status)
+        if dosen_wali_nama and dosen_wali_nama != "-":
+            index = self.input_dosen_wali.findText(dosen_wali_nama)
+            if index >= 0:
+                self.input_dosen_wali.setCurrentIndex(index)
+        else:
+            self.input_dosen_wali.setCurrentIndex(0)
 
     def show_message(self, title, message):
         msg_box = QMessageBox()
@@ -692,6 +760,7 @@ class DosenWidget(QWidget):
 
         self.form_frame = QFrame() 
         self.form_frame.setObjectName("form_frame") 
+        self.form_frame.setFixedWidth(380)
         self.form_frame.setEnabled(False) 
         form_layout = QFormLayout() 
         form_layout.setContentsMargins(20, 20, 20, 20)
@@ -1101,6 +1170,7 @@ class DosenWidget(QWidget):
         self.input_jabatan.setCurrentIndex(0)
         self.input_email.clear()
         self.input_status.setCurrentIndex(0)
+        self.input_dosen_wali.setCurrentIndex(0)
         self.form_frame.setEnabled(False) 
         self.input_nidn.setReadOnly(False) 
 
