@@ -4,8 +4,8 @@ import pandas as pd
 from collections import defaultdict
 from datetime import datetime
 from sqlalchemy import func
-from PySide6.QtCore import Qt, Signal, QDate, QSortFilterProxyModel, QMargins
-from PySide6.QtGui import QIntValidator, QStandardItemModel, QStandardItem, QPainter, QFont, QColor
+from PySide6.QtCore import Qt, Signal, QDate, QSortFilterProxyModel, QMargins, QRect, QSize
+from PySide6.QtGui import QIntValidator, QStandardItemModel, QStandardItem, QPainter, QFont, QColor, QPageSize, QPixmap
 from PySide6.QtWidgets import (
     QApplication, 
     QWidget, 
@@ -55,6 +55,11 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+
+try:
+    from PySide6.QtPrintSupport import QPrinter
+except ImportError:
+    print("Modul QtPrintSupport tidak ditemukan. Pastikan instalasi PySide6 lengkap.")
 
 # ====================================================================
 # --- KARTU 1: Halaman Login ---
@@ -2721,26 +2726,126 @@ class MainWidget(QWidget):
         
         return chart_view
 
+    def export_dashboard_to_pdf(self):
+        # 1. Pilih Lokasi Penyimpanan
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Simpan Dashboard PDF", "Laporan_Dashboard.pdf", "PDF Files (*.pdf)"
+        )
+        if not file_path:
+            return
+
+        # 2. Ambil Widget Konten dari Scroll Area
+        # Kita mengambil widget di dalamnya, bukan scroll area-nya, agar tercetak seluruhnya (full height)
+        content_widget = self.scroll_area.widget()
+        
+        if not content_widget:
+            return
+
+        try:
+            # 3. Render Widget ke Pixmap (Gambar)
+            # Menggunakan grab() untuk mengambil tampilan visual widget
+            pixmap = content_widget.grab()
+            
+            # 4. Setup Printer
+            printer = QPrinter(QPrinter.HighResolution)
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(file_path)
+            printer.setPageSize(QPageSize.A4) # Set ukuran kertas A4
+            
+            # 5. Setup Painter untuk Menggambar ke PDF
+            painter = QPainter(printer)
+            
+            # Hitung Skala agar pas di lebar A4
+            rect = printer.pageRect(QPrinter.DevicePixel).toRect()
+            factor = rect.width() / pixmap.width()
+            
+            # Tentukan apakah perlu dipotong per halaman atau dikecilkan
+            # Di sini kita akan membagi gambar jika terlalu panjang (Multi-page Logic)
+            
+            source_height = pixmap.height()
+            current_y = 0
+            
+            while current_y < source_height:
+                # Bagian gambar yang akan diprint di halaman ini
+                page_height_in_pixmap = rect.height() / factor
+                
+                # Ambil potongan gambar
+                source_rect = QRect(0, int(current_y), pixmap.width(), int(min(page_height_in_pixmap, source_height - current_y)))
+                
+                # Gambar potongan tersebut ke PDF
+                target_rect = QRect(0, 0, int(source_rect.width() * factor), int(source_rect.height() * factor))
+                painter.drawPixmap(target_rect, pixmap, source_rect)
+                
+                current_y += page_height_in_pixmap
+                
+                # Jika masih ada sisa gambar, buat halaman baru
+                if current_y < source_height:
+                    printer.newPage()
+            
+            painter.end()
+            
+            QMessageBox.information(self, "Sukses", f"Dashboard berhasil diekspor ke:\n{file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Gagal mengekspor PDF: {e}")
+
     def create_home_page(self):
         content_widget = QWidget()
         content_widget.setStyleSheet("QWidget { background-color: #FFFFFF; } QLabel { background-color: transparent; color: #000000; }")
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(20); content_layout.setAlignment(Qt.AlignTop); content_layout.setContentsMargins(30, 30, 30, 30)
+        content_layout.setSpacing(20)
+        content_layout.setAlignment(Qt.AlignTop)
+        content_layout.setContentsMargins(30, 30, 30, 30)
+
+        # --- BAGIAN BARU: TOMBOL EXPORT DI UJUNG KIRI ---
+        top_bar_layout = QHBoxLayout()
+        
+        self.btn_export_pdf = QPushButton("Export PDF")
+        self.btn_export_pdf.setCursor(Qt.PointingHandCursor)
+        self.btn_export_pdf.setFixedWidth(150) # Atur lebar agar rapi
+        self.btn_export_pdf.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C; 
+                color: white; 
+                font-weight: bold;
+                padding: 8px 15px; 
+                border-radius: 5px; 
+                border: none;
+            }
+            QPushButton:hover { background-color: #C0392B; }
+        """)
+        # Hubungkan ke fungsi export (pastikan fungsi export_dashboard_to_pdf sudah ada di class)
+        self.btn_export_pdf.clicked.connect(self.export_dashboard_to_pdf) 
+
+        top_bar_layout.addWidget(self.btn_export_pdf) # Simpan di kiri
+        top_bar_layout.addStretch() # Dorong sisa ruang ke kanan (agar tombol tetap di kiri)
+        
+        content_layout.addLayout(top_bar_layout)
+        # ------------------------------------------------
 
         # --- Header & Stats Teks ---
-        self.welcome_label = QLabel("Selamat Datang!"); self.welcome_label.setAlignment(Qt.AlignCenter); self.welcome_label.setStyleSheet("font-size: 24px; font-weight: 600; padding-bottom: 20px;")
+        self.welcome_label = QLabel("Selamat Datang!")
+        self.welcome_label.setAlignment(Qt.AlignCenter)
+        self.welcome_label.setStyleSheet("font-size: 24px; font-weight: 600; padding-bottom: 20px;")
         content_layout.addWidget(self.welcome_label)
 
-        stats_layout = QHBoxLayout(); stats_layout.setSpacing(30); stats_layout.setAlignment(Qt.AlignCenter)
+        stats_layout = QHBoxLayout()
+        stats_layout.setSpacing(30)
+        stats_layout.setAlignment(Qt.AlignCenter)
+        
         stats_style = "font-size: 16px; font-weight: bold; color: #0078D7;"
         self.label_stats_mhs = QLabel("Total Mahasiswa: 0"); self.label_stats_mhs.setStyleSheet(stats_style)
         self.label_stats_dosen = QLabel("Total Dosen: 0"); self.label_stats_dosen.setStyleSheet(stats_style)
         self.label_stats_prodi = QLabel("Total Program Studi: 0"); self.label_stats_prodi.setStyleSheet(stats_style)
-        stats_layout.addWidget(self.label_stats_mhs); stats_layout.addWidget(self.label_stats_dosen); stats_layout.addWidget(self.label_stats_prodi)
+        
+        stats_layout.addWidget(self.label_stats_mhs)
+        stats_layout.addWidget(self.label_stats_dosen)
+        stats_layout.addWidget(self.label_stats_prodi)
         content_layout.addLayout(stats_layout)
 
         # --- AREA GRAFIK ---
-        charts_layout = QVBoxLayout(); charts_layout.setSpacing(40)
+        charts_layout = QVBoxLayout()
+        charts_layout.setSpacing(40)
 
         # 1. Tren Mahasiswa (Full Width)
         self.chart_view = self.create_trend_chart()
@@ -2753,7 +2858,8 @@ class MainWidget(QWidget):
         charts_layout.addWidget(self.gender_chart_view)
 
         # 3 & 4. Rata-rata IPK & Status (Berdampingan)
-        row_34 = QHBoxLayout(); row_34.setSpacing(20)
+        row_34 = QHBoxLayout()
+        row_34.setSpacing(20)
         
         # 3. Avg IPK (Kiri)
         self.gpa_chart_view = self.create_gpa_chart()
@@ -2776,10 +2882,12 @@ class MainWidget(QWidget):
         
         # --- Scroll Area ---
         from PySide6.QtWidgets import QScrollArea
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True); scroll_area.setWidget(content_widget); scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area = QScrollArea() 
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(content_widget)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
         
-        return scroll_area
+        return self.scroll_area
 
     def handle_logout(self):
         msg_box = QMessageBox()
