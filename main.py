@@ -100,7 +100,7 @@ class LoginWidget(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(30, 30, 30, 30) 
         form_layout.setSpacing(15) 
-        self.title_label = QLabel("LOGIN")
+        self.title_label = QLabel("SISTEM AKADEMIK")
         self.title_label.setObjectName("title_label") 
         self.title_label.setAlignment(Qt.AlignCenter)
         self.label_username = QLabel("Username") 
@@ -138,39 +138,80 @@ class LoginWidget(QWidget):
         self.setLayout(main_layout)
 
     def applyStyles(self):
+        # Setup background utama aplikasi (misal: gradasi abu-abu ke biru muda)
         self.setStyleSheet("""
-            LoginWidget { background-color: #FFFFFF; }
+            LoginWidget { 
+                background-color: #E8F0FE; 
+            }
+            
+            /* --- KOTAK LOGIN (CARD) --- */
             #login_frame {
-                background-color: #F0F2F5; 
-                border-radius: 10px;
-                border: 1px solid #E5E7EB;
+                background-color: #FFFFFF; 
+                border-radius: 20px;
+                border: 1px solid #D1D9E6;
+                /* Simulasi Shadow halus lewat border tebal di sisi tertentu */
+                border-bottom: 4px solid #D1D9E6;
+                border-right: 2px solid #D1D9E6;
             }
+
+            /* --- JUDUL --- */
             #title_label {
-                font-size: 28px;
-                font-weight: bold;
-                color: #000000;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 26px;
+                font-weight: 800;
+                color: #2C3E50;
+                margin-bottom: 10px;
             }
+
+            /* --- LABEL (Username/Password) --- */
             QLabel {
+                font-family: 'Segoe UI', sans-serif;
                 font-size: 14px;
-                color: #000000;
-                font-weight: 600; 
+                color: #555555;
+                font-weight: 600;
+                margin-bottom: 2px;
             }
+
+            /* --- INPUT FIELDS --- */
             QLineEdit {
                 font-size: 14px;
-                background-color: #FFFFFF; 
-                border: 1px solid #E0E0E0; 
-                border-radius: 5px;
-                padding: 10px; 
-                color: #000000; 
+                background-color: #F8F9FA; 
+                border: 2px solid #E9ECEF; 
+                border-radius: 10px;
+                padding: 12px 15px; /* Padding diperbesar agar lega */
+                color: #333333; 
             }
-            QLineEdit:focus { border: 1px solid #0078D7; }
+            
+            /* Efek saat diklik/fokus */
+            QLineEdit:focus { 
+                border: 2px solid #0078D7; 
+                background-color: #FFFFFF;
+            }
+
+            /* --- TOMBOL LOGIN --- */
             #login_button {
-                font-size: 15px; font-weight: bold;
-                background-color: #0078D7; color: white;
-                border: none; border-radius: 5px; padding: 12px;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 16px; 
+                font-weight: bold;
+                background-color: #0078D7; 
+                color: white;
+                border: none; 
+                border-radius: 10px; 
+                padding: 15px;
+                margin-top: 10px;
             }
-            #login_button:hover { background-color: #005A9E; }
-            #login_button:pressed { background-color: #004A8C; }
+            
+            /* Efek Hover (saat mouse di atas tombol) */
+            #login_button:hover { 
+                background-color: #005A9E; 
+            }
+            
+            /* Efek Pressed (saat tombol ditekan) */
+            #login_button:pressed { 
+                background-color: #004A8C; 
+                padding-top: 17px; /* Efek tombol tertekan ke dalam */
+                padding-bottom: 13px;
+            }
         """)
 
     def handle_login(self):
@@ -2603,21 +2644,30 @@ class MainWidget(QWidget):
             self.label_stats_prodi.setText(f"Total Program Studi: {count_prodi}")
             
             # === 2. GRAFIK TREN (LINE) ===
-            self.trend_series.clear(); self.label_series.clear()
+            self.trend_series.clear()
+            self.label_series.clear()
+            
             trend_data = db.query(Mahasiswa.tahun_masuk, func.count(Mahasiswa.id))\
                            .filter(Mahasiswa.status == 'Aktif')\
                            .filter(Mahasiswa.tahun_masuk.between(2021, 2025))\
-                           .group_by(Mahasiswa.tahun_masuk).order_by(Mahasiswa.tahun_masuk).all()
+                           .group_by(Mahasiswa.tahun_masuk)\
+                           .order_by(Mahasiswa.tahun_masuk).all()
             
-            self.trend_axis_x.setRange(2020, 2026); self.trend_axis_x.setTickCount(7)
+            self.trend_axis_x.setRange(2020, 2026)
+            self.trend_axis_x.setTickCount(7)
+
             if trend_data:
                 max_count = 0
                 for tahun, jumlah in trend_data:
-                    self.trend_series.append(tahun, jumlah); self.label_series.append(tahun, jumlah + 1.5)
+                    self.trend_series.append(tahun, jumlah)
+                    self.label_series.append(tahun, jumlah + 1.5) # Offset label
                     if jumlah > max_count: max_count = jumlah
                 self.trend_axis_y.setRange(0, max(10, max_count + 5))
             else:
-                self.trend_series.append(datetime.now().year, 0); self.trend_axis_y.setRange(0, 10)
+                current_year = datetime.now().year
+                self.trend_series.append(current_year - 1, 0)
+                self.trend_series.append(current_year, 0)
+                self.trend_axis_y.setRange(0, 10)
 
             # === 3. GRAFIK RATA-RATA IPK (BAR) ===
             self.gpa_series.clear()
