@@ -476,8 +476,7 @@ class MahasiswaWidget(QWidget):
         
         db = SessionLocal()
         try:
-            # Ambil dosen yang statusnya aktif
-            dosen_list = db.query(Dosen).filter(Dosen.status == 'Aktif').all()
+            dosen_list = db.query(Dosen).all()
             for d in dosen_list:
                 # Simpan ID dosen sebagai userData (parameter kedua)
                 self.input_dosen_wali.addItem(f"{d.nama}", d.id)
@@ -1075,7 +1074,7 @@ class DosenWidget(QWidget):
             return
         required_columns = [
             "NIDN", "Nama", "Gender", 
-            "Jabatan Akademik", "Email", "Status"
+            "Jabatan Akademik", "Email"
         ]
         if not all(col in df.columns for col in required_columns):
             self.show_message("Error", 
@@ -1115,7 +1114,6 @@ class DosenWidget(QWidget):
                     gender=gender,
                     jabatan_akademik=jabatan_excel,
                     email=email,
-                    status=row["Status"]
                 )
                 db_session.add(dsn_baru)
                 added_count += 1
@@ -1200,8 +1198,6 @@ class DosenWidget(QWidget):
         self.input_gender.setCurrentIndex(0) 
         self.input_jabatan.setCurrentIndex(0)
         self.input_email.clear()
-        self.input_status.setCurrentIndex(0)
-        self.input_dosen_wali.setCurrentIndex(0)
         self.form_frame.setEnabled(False) 
         self.input_nidn.setReadOnly(False) 
 
@@ -1232,6 +1228,7 @@ class DosenWidget(QWidget):
         msg_text = f"<p style='font-size: 14px;'>{message}</p>"
         msg_box.setText(msg_text)
         msg_box.exec()
+
 # ====================================================================
 # --- KELAS: Halaman CRUD Pengguna ---
 # ====================================================================
