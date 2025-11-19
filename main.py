@@ -61,6 +61,30 @@ try:
 except ImportError:
     print("Modul QtPrintSupport tidak ditemukan. Pastikan instalasi PySide6 lengkap.")
 
+from database_models import SessionLocal, Pengguna, Mahasiswa, Dosen, Matakuliah, Nilai, AuditLog
+
+def log_activity(username, action, table, details):
+    """
+    Mencatat aktivitas ke tabel audit_logs
+    """
+    if 'SessionLocal' not in globals(): return
+    
+    db = SessionLocal()
+    try:
+        log = AuditLog(
+            username=username,
+            action=action,
+            table_name=table,
+            details=details
+        )
+        db.add(log)
+        db.commit()
+        print(f"[AUDIT] {username} - {action} - {details}")
+    except Exception as e:
+        print(f"Gagal mencatat log: {e}")
+        db.rollback()
+    finally:
+        db.close()
 # ====================================================================
 # --- KARTU 1: Halaman Login ---
 # ====================================================================
@@ -193,9 +217,9 @@ class LoginWidget(QWidget):
 # ====================================================================
 class MahasiswaWidget(QWidget):
     
-    def __init__(self):
+    def __init__(self, current_username):
         super().__init__()
-        
+        self.current_username = current_username
         self.selected_mahasiswa_id = None
         
         main_layout = QHBoxLayout(self) 
@@ -203,7 +227,8 @@ class MahasiswaWidget(QWidget):
         main_layout.setSpacing(15)
 
         self.form_frame = QFrame() 
-        self.form_frame.setObjectName("form_frame") 
+        self.form_frame.setObjectName("form_frame")
+        self.form_frame.setFixedWidth(320) 
         self.form_frame.setEnabled(False) 
         form_layout = QFormLayout() 
         form_layout.setContentsMargins(20, 20, 20, 20)
@@ -241,7 +266,7 @@ class MahasiswaWidget(QWidget):
             }
         """)
         
-        self.input_dosen_wali.addItem("-- Pilih Dosen Wali --", None)
+        self.input_dosen_wali.addItem("Pilih Dosen Wali", None)
         form_layout.addRow(QLabel("NIM:"), self.input_nim)
         form_layout.addRow(QLabel("Nama Lengkap:"), self.input_nama)
         form_layout.addRow(QLabel("Program Studi:"), self.input_prodi) 
@@ -311,8 +336,8 @@ class MahasiswaWidget(QWidget):
         self.table_mhs.setEditTriggers(QTableWidget.NoEditTriggers) 
         table_layout.addWidget(self.table_mhs)
         main_layout.addWidget(table_frame) 
-        main_layout.setStretch(0, 1) 
-        main_layout.setStretch(1, 3) 
+        main_layout.setStretch(0, 0) 
+        main_layout.setStretch(1, 2) 
 
         self.btn_update.clicked.connect(self.update_data) 
         self.btn_import.clicked.connect(self.import_from_excel) 
@@ -323,6 +348,7 @@ class MahasiswaWidget(QWidget):
         self.search_input.textChanged.connect(self.filter_table)
         self.load_dosen_options()
         self.applyStyles()
+        self.load_data()
 
     def applyStyles(self):
         self.setStyleSheet("""
@@ -444,7 +470,7 @@ class MahasiswaWidget(QWidget):
                     self.table_mhs.setRowHidden(row, True)
     def load_dosen_options(self):
         self.input_dosen_wali.clear()
-        self.input_dosen_wali.addItem("-- Pilih Dosen Wali --", None)
+        self.input_dosen_wali.addItem("Pilih Dosen Wali", None)
         
         if 'SessionLocal' not in globals(): return
         
@@ -535,6 +561,12 @@ class MahasiswaWidget(QWidget):
                 mhs.status = status
                 mhs.dosen_wali_id = dosen_wali_id
                 self.show_message("Sukses", f"Data {nama} berhasil diperbarui.")
+                log_activity(
+                    self.current_username, 
+                    "UPDATE", 
+                    "Mahasiswa", 
+                    f"Memperbarui data mahasiswa NIM: {nim}, Nama: {nama}"
+                )
                 db_session.commit()
             else:
                 self.show_message("Error", "Data tidak ditemukan (mungkin sudah dihapus).")
@@ -673,6 +705,12 @@ class MahasiswaWidget(QWidget):
                 mhs = db_session.query(Mahasiswa).get(self.selected_mahasiswa_id)
                 if mhs:
                     db_session.delete(mhs)
+                    log_activity(
+                        self.current_username, 
+                        "DELETE", 
+                        "Mahasiswa", 
+                        f"Menghapus mahasiswa ID: {self.selected_mahasiswa_id}"
+                    )
                     db_session.commit()
                     self.show_message("Sukses", "Data berhasil dihapus.")
                 else:
@@ -749,9 +787,9 @@ class MahasiswaWidget(QWidget):
 class DosenWidget(QWidget):
     JABATAN_LIST = ["--Pilih Jabatan--", "Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
 
-    def __init__(self):
+    def __init__(self, current_username):
         super().__init__()
-        
+        self.current_username = current_username
         self.selected_dosen_id = None
         
         main_layout = QHBoxLayout(self) 
@@ -1277,6 +1315,7 @@ class PenggunaWidget(QWidget):
         self.table_pengguna.itemClicked.connect(self.table_row_clicked) 
         self.search_input.textChanged.connect(self.filter_table)
         self.applyStyles()
+        self.load_data()    
 
     def applyStyles(self):
         self.setStyleSheet("""
@@ -1518,8 +1557,9 @@ class PenggunaWidget(QWidget):
 class MatakuliahWidget(QWidget):
     PRODI_LIST = ["--Pilih Prodi--"]
 
-    def __init__(self):
+    def __init__(self, current_username):
         super().__init__()
+        self.current_username = current_username
         self.selected_matakuliah_id = None
         main_layout = QHBoxLayout(self) 
         main_layout.setContentsMargins(15, 15, 15, 15)
@@ -1615,7 +1655,8 @@ class MatakuliahWidget(QWidget):
         self.search_input.textChanged.connect(self.filter_table)
         self.filter_prodi.currentTextChanged.connect(self.filter_table)
         self.filter_semester.currentTextChanged.connect(self.filter_table)
-        self.applyStyles() 
+        self.applyStyles()
+        self.load_data() 
 
     def applyStyles(self):
         self.setStyleSheet("""
@@ -1854,9 +1895,9 @@ class NilaiWidget(QWidget):
     }
     NILAI_HURUF_LIST = ["A", "B", "C", "D", "E"]
 
-    def __init__(self):
+    def __init__(self, current_username):
         super().__init__()
-        
+        self.current_username = current_username
         self.mahasiswa_map = {} 
         self.matakuliah_map = {} 
         self.all_matakuliah_map = defaultdict(list)
@@ -1958,8 +1999,8 @@ class NilaiWidget(QWidget):
         self.semester_combo.activated.connect(self.update_mk_dropdown)
         self.btn_simpan_nilai.clicked.connect(self.simpan_nilai_baru)
         self.btn_hapus_nilai.clicked.connect(self.hapus_nilai)
-        
         self.applyStyles()
+        self.load_initial_data()
 
     def applyStyles(self):
         self.setStyleSheet("""
@@ -2376,12 +2417,13 @@ class MainWidget(QWidget):
         main_layout.addWidget(self.nav_frame)
         
         self.page_stack = QStackedWidget()
-        self.home_page = self.create_home_page() # Memanggil home page yang baru
-        self.mhs_page = MahasiswaWidget()
-        self.dosen_page = DosenWidget()
-        self.mk_page = MatakuliahWidget() 
-        self.nilai_page = NilaiWidget() 
+        self.home_page = self.create_home_page() 
+        self.mhs_page = MahasiswaWidget(self.current_username)
+        self.dosen_page = DosenWidget(self.current_username)
+        self.mk_page = MatakuliahWidget(self.current_username) 
+        self.nilai_page = NilaiWidget(self.current_username) 
         self.pengguna_page = PenggunaWidget(current_username=self.current_username)
+        self.audit_page = AuditLogWidget()
         
         self.page_stack.addWidget(self.home_page)     # Indeks 0
         self.page_stack.addWidget(self.mhs_page)      # Indeks 1
@@ -2398,6 +2440,8 @@ class MainWidget(QWidget):
         self.chart_view.setMinimumWidth(1000)
         self.chart_view.setMinimumHeight(400)
         self.chart_view.setContentsMargins(10, 10, 30, 10)
+        self.audit_page = AuditLogWidget()                      # <-- Widget Baru
+        self.page_stack.addWidget(self.audit_page) # Indeks misal 6
 
     
     def create_nav_frame(self, user_role): 
@@ -2432,7 +2476,10 @@ class MainWidget(QWidget):
         self.btn_nilai.clicked.connect(self.show_nilai_page) 
         self.btn_pengguna.clicked.connect(self.show_pengguna_page) 
         self.btn_logout.clicked.connect(self.handle_logout)
+        self.btn_audit = QPushButton("Audit Log")
+        self.btn_audit.clicked.connect(self.show_audit_page)
         
+        nav_layout.addWidget(self.btn_audit)
         nav_layout.addWidget(self.btn_home)
         nav_layout.addWidget(self.btn_mhs)
         nav_layout.addWidget(self.btn_dosen)
@@ -2441,6 +2488,7 @@ class MainWidget(QWidget):
         nav_layout.addWidget(self.btn_pengguna) 
         nav_layout.addStretch() 
         nav_layout.addWidget(self.btn_logout)
+        
 
         if user_role != "Admin Manajemen":
             self.btn_pengguna.hide() 
@@ -2547,7 +2595,10 @@ class MainWidget(QWidget):
         chart_view.setMinimumHeight(400)
         return chart_view
     
-
+    def show_audit_page(self):
+        self.audit_page.load_data() # Refresh data saat dibuka
+        self.page_stack.setCurrentWidget(self.audit_page)
+    
     def update_dashboard_stats(self):
         if not hasattr(self, 'label_stats_mhs') or 'SessionLocal' not in globals():
             return
@@ -2972,7 +3023,10 @@ class MainWidget(QWidget):
     def set_user_info(self, username, role): 
         self.current_username = username
         self.current_role = role
-        
+        self.mhs_page.current_username = username
+        self.dosen_page.current_username = username
+        self.mk_page.current_username = username
+        self.nilai_page.current_username = username
         try:
             self.welcome_label.setText(f"Selamat Datang, {self.current_username}!\n\nAnda login sebagai: {self.current_role}")
         except AttributeError:
@@ -3017,6 +3071,156 @@ class AppWindow(QMainWindow):
         self.statusBar().show()
         self.showMaximized()
 
+class AuditLogWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        self.applyStyles()
+        
+    def initUI(self):
+        # Layout Utama
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Frame Container (Agar mirip "Kartu" seperti widget lain)
+        self.container_frame = QFrame()
+        self.container_frame.setObjectName("container_frame")
+        
+        # Layout di dalam Frame
+        frame_layout = QVBoxLayout(self.container_frame)
+        frame_layout.setContentsMargins(20, 20, 20, 20)
+        frame_layout.setSpacing(15)
+        
+        # --- BAGIAN ATAS: JUDUL & TOMBOL REFRESH ---
+        header_layout = QHBoxLayout()
+        
+        self.label_title = QLabel("Riwayat Aktivitas Sistem")
+        self.label_title.setObjectName("title_label")
+        
+        self.btn_refresh = QPushButton("Refresh Log")
+        self.btn_refresh.setObjectName("btn_simpan") # Menggunakan ID style tombol biru
+        self.btn_refresh.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh.setFixedWidth(150)
+        
+        header_layout.addWidget(self.label_title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.btn_refresh)
+        
+        frame_layout.addLayout(header_layout)
+        
+        # --- BAGIAN TABEL ---
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Waktu", "User", "Action", "Tabel", "Detail Aktivitas"])
+        
+        # Setup Header Table
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents) # Waktu
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # User
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Action
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Tabel
+        header.setSectionResizeMode(4, QHeaderView.Stretch)          # Detail (Melar)
+        
+        self.table.verticalHeader().hide()
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        frame_layout.addWidget(self.table)
+        
+        # Masukkan Frame ke Layout Utama
+        main_layout.addWidget(self.container_frame)
+        
+        # Koneksi Tombol
+        self.btn_refresh.clicked.connect(self.load_data)
+        
+        # Load data pertama kali
+        self.load_data()
+        
+    def applyStyles(self):
+        self.setStyleSheet("""
+            AuditLogWidget { background-color: #FFFFFF; }
+            
+            /* Frame Container (Kartu Abu-abu Muda) */
+            #container_frame {
+                background-color: #F0F2F5;
+                border-radius: 10px;
+                border: 1px solid #E5E7EB;
+            }
+            
+            /* Judul Halaman */
+            #title_label {
+                font-size: 20px;
+                font-weight: bold;
+                color: #2C3E50;
+            }
+            
+            /* Style Tombol (Sama dengan tombol 'Update Data' / 'Simpan') */
+            #btn_simpan { 
+                background-color: #0078D7; 
+                color: white;
+                font-weight: bold;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            #btn_simpan:hover { background-color: #005A9E; }
+            #btn_simpan:pressed { background-color: #004A8C; }
+            
+            /* Style Tabel (Putih Bersih) */
+            QTableWidget {
+                background-color: #FFFFFF;
+                border: 1px solid #E0E0E0;
+                gridline-color: #E0E0E0;
+                color: #000000;
+                font-size: 14px;
+            }
+            
+            /* Header Tabel */
+            QHeaderView::section {
+                background-color: #F7F7F7;
+                padding: 10px;
+                border: 1px solid #E0E0E0;
+                font-size: 14px;
+                font-weight: 600;
+                color: #000000;
+            }
+            
+            /* Item Tabel saat dipilih */
+            QTableWidget::item:selected {
+                background-color: #0078D7;
+                color: #FFFFFF;
+            }
+        """)
+
+    def load_data(self):
+        if 'SessionLocal' not in globals(): return
+        db = SessionLocal()
+        try:
+            # Ambil 100 log terakhir
+            logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
+            
+            self.table.setRowCount(0)
+            for row, log in enumerate(logs):
+                self.table.insertRow(row)
+                waktu_str = log.timestamp.strftime("%d/%m/%Y %H:%M") if log.timestamp else "-"
+                
+                # Helper untuk membuat item tabel (read only)
+                def create_item(text):
+                    item = QTableWidgetItem(str(text))
+                    item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                    return item
+
+                self.table.setItem(row, 0, create_item(waktu_str))
+                self.table.setItem(row, 1, create_item(log.username))
+                self.table.setItem(row, 2, create_item(log.action))
+                self.table.setItem(row, 3, create_item(log.table_name))
+                self.table.setItem(row, 4, create_item(log.details))
+                
+        except Exception as e:
+            print(f"Error load log: {e}")
+        finally:
+            db.close()
 # ====================================================================
 # --- Bagian 'main' ---
 # ====================================================================

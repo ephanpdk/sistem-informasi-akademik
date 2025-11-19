@@ -1,5 +1,6 @@
-from sqlalchemy import create_engine, Column, Integer, String, Date, Float, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Date, Float, ForeignKey, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.sql import func
 from datetime import date
 
 # --- Konfigurasi Database ---
@@ -90,6 +91,15 @@ class Nilai(Base):
     # Relasi
     mahasiswa = relationship("Mahasiswa", backref="nilai")
     matakuliah = relationship("Matakuliah", backref="nilai")
+    
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    username = Column(String(50), nullable=False)   # Siapa pelakunya
+    action = Column(String(50), nullable=False)     # CREATE, UPDATE, DELETE, LOGIN
+    table_name = Column(String(50), nullable=False) # Tabel yang diubah (Mahasiswa, Dosen, dll)
+    details = Column(Text, nullable=True)           # Detail (misal: "Mengubah Nilai Budi")
 
 # --- Fungsi untuk membuat tabel (Hanya berjalan jika tabel belum ada) ---
 def create_tables():
