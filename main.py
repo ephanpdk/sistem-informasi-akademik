@@ -308,7 +308,12 @@ class MahasiswaWidget(QWidget):
         self.i_thn = QLineEdit(); self.i_thn.setValidator(QIntValidator(2000,2100))
         self.i_tgl = QDateEdit(); self.i_tgl.setCalendarPopup(True); self.i_tgl.setDisplayFormat("dd/MM/yyyy")
         self.i_stat = QComboBox(); self.i_stat.addItems(["Aktif", "Lulus", "Cuti", "DO"])
+        
         self.i_doswal = QComboBox()
+        self.i_doswal.setEditable(True)
+        self.i_doswal.setInsertPolicy(QComboBox.NoInsert)
+        self.i_doswal.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.i_doswal.completer().setFilterMode(Qt.MatchContains)
         
         f_grid.addRow("NIM", self.i_nim); f_grid.addRow("Nama", self.i_nama)
         f_grid.addRow("Prodi", self.i_prodi); f_grid.addRow("L/P", self.i_gen)
@@ -386,7 +391,12 @@ class MahasiswaWidget(QWidget):
         tgl = self.table.item(r,6).text()
         if tgl != "-": self.i_tgl.setDate(QDate.fromString(tgl, "dd/MM/yyyy"))
         self.i_stat.setCurrentText(self.table.item(r,7).text())
-        self.i_doswal.setCurrentText(self.table.item(r,8).text())
+        
+        doswal_name = self.table.item(r,8).text()
+        if doswal_name and doswal_name != "-":
+            self.i_doswal.setCurrentText(doswal_name)
+        else:
+            self.i_doswal.setCurrentIndex(0)
 
     def reset(self):
         self.sel_id = None; self.form_card.setEnabled(False)
@@ -406,7 +416,14 @@ class MahasiswaWidget(QWidget):
                 m.tahun_masuk = int(self.i_thn.text())
                 m.tanggal_lahir = self.i_tgl.date().toPython()
                 m.status = self.i_stat.currentText()
-                m.dosen_wali_id = self.i_doswal.currentData()
+                
+                current_idx = self.i_doswal.currentIndex()
+                if current_idx < 0:
+                    found_idx = self.i_doswal.findText(self.i_doswal.currentText())
+                    m.dosen_wali_id = self.i_doswal.itemData(found_idx) if found_idx >= 0 else None
+                else:
+                    m.dosen_wali_id = self.i_doswal.currentData()
+
                 log_activity(self.username, "UPDATE", "Mahasiswa", f"NIM: {m.nim}")
                 db.commit(); self.load_data(); self.reset()
                 QMessageBox.information(self, "Sukses", "Data Disimpan")
@@ -742,7 +759,12 @@ class NilaiWidget(QWidget):
         
         top = QFrame(); top.setObjectName("form_frame"); add_shadow(top)
         tl = QHBoxLayout(top); tl.setContentsMargins(20,20,20,20)
-        self.cb_mhs = QComboBox(); self.cb_mhs.setEditable(True)
+        
+        self.cb_mhs = QComboBox()
+        self.cb_mhs.setEditable(True)
+        self.cb_mhs.setInsertPolicy(QComboBox.NoInsert)
+        self.cb_mhs.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.cb_mhs.completer().setFilterMode(Qt.MatchContains)
         self.cb_mhs.activated.connect(self.mahasiswa_dipilih)
         
         self.lbl_ipk = QLabel("IPK: -", styleSheet="font-size:16px; font-weight:bold; color:#0EA5E9")
@@ -782,13 +804,19 @@ class NilaiWidget(QWidget):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
         try:
-            self.cb_mhs.clear(); self.cb_mhs.addItem("- Pilih Mahasiswa -")
+            self.cb_mhs.clear()
             self.mahasiswa_map = {}
             
+            model = QStandardItemModel()
+            model.appendRow(QStandardItem("- Pilih Mahasiswa -"))
+
             for m in db.query(Mahasiswa).filter_by(status='Aktif').all():
                 txt = f"{m.nim} - {m.nama}"
                 self.mahasiswa_map[txt] = {"id": m.id, "prodi": m.program_studi}
-                self.cb_mhs.addItem(txt)
+                model.appendRow(QStandardItem(txt))
+            
+            self.cb_mhs.setModel(model)
+            self.cb_mhs.setModelColumn(0)
 
             self.all_matakuliah_map = defaultdict(list)
             for mk in db.query(Matakuliah).all():
@@ -901,6 +929,7 @@ class NilaiWidget(QWidget):
         if not self.cur_mhs_id: return
         db = SessionLocal()
         mhs = db.query(Mahasiswa).get(self.cur_mhs_id)
+        doswal_nama = mhs.dosen_wali.nama if mhs.dosen_wali else "-"
         vals = db.query(Nilai, Matakuliah).join(Matakuliah).filter(Nilai.mahasiswa_id==mhs.id).order_by(Nilai.semester_diambil).all()
         db.close()
 
@@ -917,6 +946,7 @@ class NilaiWidget(QWidget):
         info = [
             [Paragraph("<b>Nama</b>", styles["Normal"]), ": " + mhs.nama, Paragraph("<b>Prodi</b>", styles["Normal"]), ": " + mhs.program_studi],
             [Paragraph("<b>NIM</b>", styles["Normal"]), ": " + mhs.nim, Paragraph("<b>Thn Masuk</b>", styles["Normal"]), ": " + str(mhs.tahun_masuk)],
+            [Paragraph("<b>Dosen Wali</b>", styles["Normal"]), ": " + doswal_nama, "", ""]
         ]
         t_info = Table(info, colWidths=[1.2*inch, 2.5*inch, 1.2*inch, 2.5*inch])
         t_info.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
@@ -948,6 +978,16 @@ class NilaiWidget(QWidget):
             ["Predikat", f": {'Cum Laude' if ipk > 3.5 else 'Sangat Memuaskan' if ipk > 3.0 else 'Memuaskan'}"]
         ]
         elements.append(Table(sum_data, hAlign='LEFT'))
+        
+        elements.append(Spacer(1, 30))
+        tgl_cetak = datetime.now().strftime("%d %B %Y")
+        ttd_data = [
+            [Paragraph(f"Dicetak pada: {tgl_cetak}", styles["Normal"])],
+            [Spacer(1, 30)],
+            [Paragraph("( ........................... )", styles["Normal"])]
+        ]
+        t_ttd = Table(ttd_data, hAlign='RIGHT')
+        elements.append(t_ttd)
         
         try:
             doc.build(elements)
