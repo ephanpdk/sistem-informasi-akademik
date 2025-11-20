@@ -2644,7 +2644,7 @@ class MainWidget(QWidget):
         self.label_series.setMarkerSize(1.0)
         self.label_series.setColor(Qt.transparent)
         self.label_series.setPointLabelsVisible(True)
-        self.label_series.setPointLabelsFormat("@yPoint")
+        self.label_series.setPointLabelsFormat("@yPoint\n\n\n\n\n\n\n\n\n\n\n\n\n")
         self.label_series.setPointLabelsColor(theme_color)
         self.label_series.setPointLabelsClipping(False)
         label_font = QFont("Arial", 10); label_font.setBold(True)
@@ -2716,8 +2716,15 @@ class MainWidget(QWidget):
                 max_count = 0
                 for tahun, jumlah in trend_data:
                     self.trend_series.append(tahun, jumlah)
-                    self.label_series.append(tahun, jumlah + 1.5) # Offset label
+                    
+                    # --- PERUBAHAN DI SINI ---
+                    # Hapus "+ 1.5". Gunakan 'jumlah' murni agar format label (@yPoint) menjadi integer.
+                    # Posisi text akan turun tepat ke titik data, namun angka akan sesuai (bulat).
+                    self.label_series.append(tahun, jumlah) 
+                    
                     if jumlah > max_count: max_count = jumlah
+                
+                # Tambahkan padding atas agar label tidak terpotong
                 self.trend_axis_y.setRange(0, max(10, max_count + 5))
             else:
                 current_year = datetime.now().year
@@ -2725,6 +2732,7 @@ class MainWidget(QWidget):
                 self.trend_series.append(current_year, 0)
                 self.trend_axis_y.setRange(0, 10)
 
+            # ... (SISA KODE KE BAWAH TIDAK PERLU DIUBAH) ...
             # === 3. GRAFIK RATA-RATA IPK (BAR) ===
             self.gpa_series.clear()
             raw_gpa = db.query(Mahasiswa.program_studi, Nilai.nilai_angka, Matakuliah.sks)\
@@ -2783,20 +2791,16 @@ class MainWidget(QWidget):
                 if t > max_gen: max_gen = t
             self.gender_axis_y.setRange(0, max(10, max_gen + 5))
 
-            # === 6. GRAFIK SEBARAN IPK (BARU - HISTOGRAM STYLE) ===
+            # === 6. GRAFIK SEBARAN IPK ===
             self.dist_series.clear()
-            
-            # Ambil data nilai per mahasiswa untuk hitung IPK individu
             raw_scores = db.query(Nilai.mahasiswa_id, Nilai.nilai_angka, Matakuliah.sks)\
                            .join(Matakuliah).filter(Mahasiswa.status == 'Aktif').all()
             
-            # Hitung IPK per mahasiswa: {mhs_id: [total_poin, total_sks]}
             student_scores = defaultdict(lambda: [0, 0])
             for mid, val, sks in raw_scores:
                 student_scores[mid][0] += val * sks
                 student_scores[mid][1] += sks
             
-            # Bucket: <2.00, 2.00-2.75, 2.76-3.50, 3.51-4.00
             buckets = [0, 0, 0, 0]
             for data in student_scores.values():
                 if data[1] > 0:
@@ -2804,17 +2808,14 @@ class MainWidget(QWidget):
                     if ipk < 2.00: buckets[0] += 1
                     elif ipk <= 2.75: buckets[1] += 1
                     elif ipk <= 3.50: buckets[2] += 1
-                    else: buckets[3] += 1 # Cum Laude area
+                    else: buckets[3] += 1 
             
             bar_dist = QBarSet("Mahasiswa")
-            bar_dist.setColor(QColor("#9B59B6")) # Warna Ungu (Violet)
+            bar_dist.setColor(QColor("#9B59B6")) 
             bar_dist.setLabelColor(Qt.white)
-            
-            # --- PERBAIKAN: Definisi ulang label_font di sini ---
             label_font = QFont("Arial", 11)
             label_font.setBold(True)
             bar_dist.setLabelFont(label_font)
-            # ----------------------------------------------------
             
             for b in buckets:
                 bar_dist.append(b)
