@@ -588,7 +588,11 @@ class MatakuliahWidget(QWidget):
         self.f_smt = QComboBox(); self.f_smt.addItems(["Semua Smt"] + [str(i) for i in range(1,9)])
         self.f_smt.currentTextChanged.connect(self.filter)
         
+        b_imp = QPushButton("Import"); b_imp.setObjectName("btn_export"); b_imp.clicked.connect(self.import_xls)
+        b_exp = QPushButton("Export"); b_exp.setObjectName("btn_export"); b_exp.clicked.connect(self.export_xls)
+
         th.addWidget(self.search, 2); th.addWidget(self.f_prodi, 1); th.addWidget(self.f_smt, 1)
+        th.addWidget(b_imp); th.addWidget(b_exp)
         tl.addLayout(th)
 
         self.table = QTableWidget(); self.table.setColumnCount(6)
@@ -674,11 +678,63 @@ class MatakuliahWidget(QWidget):
                     (fs == "Semua Smt" or fs == smt)
             self.table.setRowHidden(r, not match)
 
+    def import_xls(self):
+        path, _ = QFileDialog.getOpenFileName(self, "File Excel", "", "*.xlsx")
+        if not path: return
+        try:
+            df = pd.read_excel(path).astype(str)
+            req = ["Kode MK", "Nama Matakuliah", "SKS", "Semester", "Program Studi"]
+            if not all(c in df.columns for c in req):
+                    if "Fakultas" in df.columns and "Program Studi" not in df.columns:
+                        df.rename(columns={"Fakultas": "Program Studi"}, inplace=True)
+                    else:
+                        QMessageBox.critical(self, "Error", "Format Excel salah. Kolom: " + ", ".join(req))
+                        return
+            
+            db = SessionLocal()
+            added = 0
+            for _, row in df.iterrows():
+                prodi_valid = (len(self.PRODI_LIST) <= 1) or (row["Program Studi"] in self.PRODI_LIST)
+                if not db.query(Matakuliah).filter_by(kode_mk=row["Kode MK"]).first() and prodi_valid:
+                    try:
+                        db.add(Matakuliah(
+                            kode_mk=row["Kode MK"],
+                            nama_matakuliah=row["Nama Matakuliah"],
+                            sks=int(row["SKS"]),
+                            semester=int(row["Semester"]),
+                            program_studi=row["Program Studi"]
+                        ))
+                        added += 1
+                    except: pass
+            db.commit(); db.close(); self.load_data()
+            QMessageBox.information(self, "Import", f"Berhasil: {added} data.")
+        except Exception as e: QMessageBox.critical(self, "Error", str(e))
+
+    def export_xls(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export", "matakuliah.xlsx", "*.xlsx")
+        if not path: return
+        data = []
+        headers = [self.table.horizontalHeaderItem(c).text() for c in range(self.table.columnCount()) if not self.table.isColumnHidden(c)]
+        for r in range(self.table.rowCount()):
+            if not self.table.isRowHidden(r):
+                row = [self.table.item(r, c).text() for c in range(self.table.columnCount()) if not self.table.isColumnHidden(c)]
+                data.append(row)
+        try:
+            pd.DataFrame(data, columns=headers).to_excel(path, index=False)
+            QMessageBox.information(self, "Sukses", "Export berhasil.")
+        except Exception as e: QMessageBox.critical(self, "Error", str(e))
+
 class NilaiWidget(QWidget):
+    NILAI_BOBOT = {"A": 4.0, "B": 3.0, "C": 2.0, "D": 1.0, "E": 0.0}
+
     def __init__(self, username):
         super().__init__()
         self.username = username
-        self.cur_mhs = None
+        self.cur_mhs_id = None
+        self.cur_prodi = None
+        self.mahasiswa_map = {}
+        self.all_matakuliah_map = defaultdict(list)
+        self.matakuliah_current_map = {}
         self.initUI()
 
     def initUI(self):
@@ -687,111 +743,218 @@ class NilaiWidget(QWidget):
         top = QFrame(); top.setObjectName("form_frame"); add_shadow(top)
         tl = QHBoxLayout(top); tl.setContentsMargins(20,20,20,20)
         self.cb_mhs = QComboBox(); self.cb_mhs.setEditable(True)
-        self.cb_mhs.activated.connect(self.load_mhs)
+        self.cb_mhs.activated.connect(self.mahasiswa_dipilih)
+        
         self.lbl_ipk = QLabel("IPK: -", styleSheet="font-size:16px; font-weight:bold; color:#0EA5E9")
         tl.addWidget(QLabel("Pilih Mahasiswa:")); tl.addWidget(self.cb_mhs, 2); tl.addStretch(); tl.addWidget(self.lbl_ipk)
         
         mid = QFrame(); mid.setObjectName("form_frame"); add_shadow(mid)
         ml = QHBoxLayout(mid)
         self.cb_mk = QComboBox(); self.cb_mk.setEditable(True)
-        self.cb_smt = QComboBox(); self.cb_smt.addItems([str(i) for i in range(1,9)])
+        self.cb_smt = QComboBox(); self.cb_smt.addItems(["- Smt -"] + [str(i) for i in range(1,9)])
+        self.cb_smt.currentTextChanged.connect(self.update_mk_dropdown)
+        
         self.cb_nil = QComboBox(); self.cb_nil.addItems(["A","B","C","D","E"])
-        b_add = QPushButton("Tambah Nilai"); b_add.setObjectName("btn_simpan"); b_add.clicked.connect(self.add_nilai)
-        ml.addWidget(self.cb_smt); ml.addWidget(self.cb_mk, 2); ml.addWidget(self.cb_nil); ml.addWidget(b_add)
+        
+        b_add = QPushButton("Simpan Nilai"); b_add.setObjectName("btn_simpan"); b_add.clicked.connect(self.simpan_nilai)
+        b_del = QPushButton("Hapus"); b_del.setObjectName("btn_hapus"); b_del.clicked.connect(self.hapus_nilai)
+        
+        ml.addWidget(self.cb_smt); ml.addWidget(self.cb_mk, 2); ml.addWidget(self.cb_nil); ml.addWidget(b_add); ml.addWidget(b_del)
         
         bot = QFrame(); bot.setObjectName("table_frame"); add_shadow(bot)
         bl = QVBoxLayout(bot)
-        self.table = QTableWidget(); self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Smt", "Kode", "Matakuliah", "SKS", "Nilai"])
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table = QTableWidget(); self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(["ID", "Smt", "Kode", "Matakuliah", "SKS", "Nilai", "Bobot"])
+        self.table.setColumnHidden(0, True)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         
-        b_pdf = QPushButton("Cetak Transkrip (PDF)"); b_pdf.setObjectName("btn_simpan"); b_pdf.clicked.connect(self.print_pdf)
+        b_pdf = QPushButton("Cetak Transkrip (PDF)"); b_pdf.setObjectName("btn_simpan"); b_pdf.clicked.connect(self.print_transkrip)
         
         bl.addWidget(self.table); bl.addWidget(b_pdf)
         
         layout.addWidget(top); layout.addWidget(mid); layout.addWidget(bot)
-        self.load_init()
+        self.load_initial_data()
 
-    def load_init(self):
+    def load_initial_data(self):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
-        self.cb_mhs.addItem("- Pilih -", None)
-        for m in db.query(Mahasiswa).all(): self.cb_mhs.addItem(f"{m.nim} - {m.nama}", m.id)
-        for k in db.query(Matakuliah).all(): self.cb_mk.addItem(f"{k.kode_mk} - {k.nama_matakuliah}", k.id)
-        db.close()
+        try:
+            self.cb_mhs.clear(); self.cb_mhs.addItem("- Pilih Mahasiswa -")
+            self.mahasiswa_map = {}
+            
+            for m in db.query(Mahasiswa).filter_by(status='Aktif').all():
+                txt = f"{m.nim} - {m.nama}"
+                self.mahasiswa_map[txt] = {"id": m.id, "prodi": m.program_studi}
+                self.cb_mhs.addItem(txt)
 
-    def load_mhs(self):
-        mid = self.cb_mhs.currentData()
-        self.cur_mhs = mid
-        if not mid: self.table.setRowCount(0); return
+            self.all_matakuliah_map = defaultdict(list)
+            for mk in db.query(Matakuliah).all():
+                key = (str(mk.semester), mk.program_studi)
+                disp = f"{mk.kode_mk} - {mk.nama_matakuliah}"
+                self.all_matakuliah_map[key].append((disp, {"id": mk.id, "sks": mk.sks}))
+        finally:
+            db.close()
+
+    def mahasiswa_dipilih(self):
+        txt = self.cb_mhs.currentText()
+        data = self.mahasiswa_map.get(txt)
+        if data:
+            self.cur_mhs_id = data["id"]
+            self.cur_prodi = data["prodi"]
+            self.load_transkrip()
+            self.cb_smt.setCurrentIndex(0)
+            self.cb_mk.clear()
+        else:
+            self.cur_mhs_id = None
+            self.cur_prodi = None
+            self.table.setRowCount(0)
+            self.lbl_ipk.setText("IPK: -")
+
+    def update_mk_dropdown(self):
+        self.cb_mk.clear()
+        self.matakuliah_current_map = {}
+        smt = self.cb_smt.currentText()
         
+        if not self.cur_prodi or smt == "- Smt -": return
+
+        mks = self.all_matakuliah_map.get((smt, self.cur_prodi), [])
+        for name, data in mks:
+            self.matakuliah_current_map[name] = data
+            self.cb_mk.addItem(name)
+
+    def load_transkrip(self):
+        if not self.cur_mhs_id: return
         db = SessionLocal()
         try:
-            vals = db.query(Nilai).filter_by(mahasiswa_id=mid).all()
+            rows = db.query(Nilai, Matakuliah).join(Matakuliah).filter(Nilai.mahasiswa_id == self.cur_mhs_id).order_by(Nilai.semester_diambil).all()
             self.table.setRowCount(0)
             tsks = 0; tbobot = 0
-            for i, n in enumerate(vals):
+            
+            for i, (n, mk) in enumerate(rows):
                 self.table.insertRow(i)
-                mk = n.matakuliah
-                self.table.setItem(i,0,QTableWidgetItem(str(n.semester_diambil)))
-                self.table.setItem(i,1,QTableWidgetItem(mk.kode_mk))
-                self.table.setItem(i,2,QTableWidgetItem(mk.nama_matakuliah))
-                self.table.setItem(i,3,QTableWidgetItem(str(mk.sks)))
-                self.table.setItem(i,4,QTableWidgetItem(n.nilai_huruf))
+                self.table.setItem(i, 0, QTableWidgetItem(str(n.id)))
+                self.table.setItem(i, 1, QTableWidgetItem(str(n.semester_diambil)))
+                self.table.setItem(i, 2, QTableWidgetItem(mk.kode_mk))
+                self.table.setItem(i, 3, QTableWidgetItem(mk.nama_matakuliah))
+                self.table.setItem(i, 4, QTableWidgetItem(str(mk.sks)))
+                self.table.setItem(i, 5, QTableWidgetItem(n.nilai_huruf))
+                self.table.setItem(i, 6, QTableWidgetItem(str(n.nilai_angka)))
+                
                 tsks += mk.sks
                 tbobot += (n.nilai_angka * mk.sks)
-            ipk = tbobot/tsks if tsks > 0 else 0
+            
+            ipk = tbobot / tsks if tsks > 0 else 0.0
             self.lbl_ipk.setText(f"Total SKS: {tsks} | IPK: {ipk:.2f}")
-        finally: db.close()
+        finally:
+            db.close()
 
-    def add_nilai(self):
-        if not self.cur_mhs: return
+    def simpan_nilai(self):
+        if not self.cur_mhs_id: return
+        mk_txt = self.cb_mk.currentText()
+        if not mk_txt or mk_txt not in self.matakuliah_current_map:
+            QMessageBox.warning(self, "Error", "Pilih Matakuliah valid"); return
+
+        mk_id = self.matakuliah_current_map[mk_txt]["id"]
+        hrf = self.cb_nil.currentText()
+        angka = self.NILAI_BOBOT[hrf]
+        smt = int(self.cb_smt.currentText())
+
         db = SessionLocal()
         try:
-            mk_id = self.cb_mk.currentData()
-            
-            exists = db.query(Nilai).filter_by(mahasiswa_id=self.cur_mhs, matakuliah_id=mk_id).first()
-            if exists:
-                QMessageBox.warning(self, "Gagal", "Matakuliah ini sudah memiliki nilai untuk mahasiswa ini.")
-                return
+            exist = db.query(Nilai).filter_by(mahasiswa_id=self.cur_mhs_id, matakuliah_id=mk_id).first()
+            if exist:
+                if QMessageBox.question(self, "Update", "Nilai sudah ada. Update?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+                    exist.nilai_huruf = hrf
+                    exist.nilai_angka = angka
+                    log_activity(self.username, "UPDATE", "Nilai", f"Mhs {self.cur_mhs_id} MK {mk_id} -> {hrf}")
+                    db.commit(); QMessageBox.information(self, "Sukses", "Nilai Diupdate")
+            else:
+                db.add(Nilai(mahasiswa_id=self.cur_mhs_id, matakuliah_id=mk_id, nilai_huruf=hrf, nilai_angka=angka, semester_diambil=smt))
+                log_activity(self.username, "CREATE", "Nilai", f"Mhs {self.cur_mhs_id} MK {mk_id} -> {hrf}")
+                db.commit(); QMessageBox.information(self, "Sukses", "Nilai Disimpan")
+            self.load_transkrip()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+        finally:
+            db.close()
 
-            hrf = self.cb_nil.currentText()
-            angka = {"A":4,"B":3,"C":2,"D":1,"E":0}[hrf]
-            db.add(Nilai(mahasiswa_id=self.cur_mhs, matakuliah_id=mk_id, nilai_huruf=hrf, nilai_angka=angka, semester_diambil=int(self.cb_smt.currentText())))
-            db.commit(); self.load_mhs()
-        except: db.rollback()
-        finally: db.close()
-
-    def print_pdf(self):
-        if not self.cur_mhs: return
-        path, _ = QFileDialog.getSaveFileName(self, "Save PDF", f"Transkrip_{self.cur_mhs}.pdf", "*.pdf")
-        if not path: return
+    def hapus_nilai(self):
+        row = self.table.currentRow()
+        if row < 0: QMessageBox.warning(self, "Error", "Pilih nilai di tabel"); return
         
-        doc = SimpleDocTemplate(path, pagesize=A4)
+        nid = int(self.table.item(row, 0).text())
+        if QMessageBox.question(self, "Hapus", "Yakin hapus nilai ini?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+            db = SessionLocal()
+            try:
+                obj = db.query(Nilai).get(nid)
+                if obj:
+                    db.delete(obj)
+                    log_activity(self.username, "DELETE", "Nilai", f"ID {nid}")
+                    db.commit(); self.load_transkrip()
+            finally:
+                db.close()
+
+    def print_transkrip(self):
+        if not self.cur_mhs_id: return
+        db = SessionLocal()
+        mhs = db.query(Mahasiswa).get(self.cur_mhs_id)
+        vals = db.query(Nilai, Matakuliah).join(Matakuliah).filter(Nilai.mahasiswa_id==mhs.id).order_by(Nilai.semester_diambil).all()
+        db.close()
+
+        path, _ = QFileDialog.getSaveFileName(self, "Simpan PDF", f"Transkrip_{mhs.nim}.pdf", "*.pdf")
+        if not path: return
+
+        doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
         elements = []
         styles = getSampleStyleSheet()
-        
-        elements.append(Paragraph("TRANSKRIP NILAI", styles['Title']))
-        elements.append(Spacer(1, 0.5*inch))
-        
-        data = [["Smt", "Kode", "Matakuliah", "SKS", "Nilai"]]
-        for r in range(self.table.rowCount()):
-            row = [self.table.item(r, c).text() for c in range(5)]
-            data.append(row)
-            
-        t = Table(data)
+
+        elements.append(Paragraph("TRANSKRIP AKADEMIK", styles['Title']))
+        elements.append(Spacer(1, 20))
+
+        info = [
+            [Paragraph("<b>Nama</b>", styles["Normal"]), ": " + mhs.nama, Paragraph("<b>Prodi</b>", styles["Normal"]), ": " + mhs.program_studi],
+            [Paragraph("<b>NIM</b>", styles["Normal"]), ": " + mhs.nim, Paragraph("<b>Thn Masuk</b>", styles["Normal"]), ": " + str(mhs.tahun_masuk)],
+        ]
+        t_info = Table(info, colWidths=[1.2*inch, 2.5*inch, 1.2*inch, 2.5*inch])
+        t_info.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        elements.append(t_info); elements.append(Spacer(1, 20))
+
+        data = [['No', 'Smt', 'Kode', 'Matakuliah', 'SKS', 'Nilai', 'Bobot']]
+        tsks = 0; tpoin = 0
+        for i, (n, mk) in enumerate(vals, 1):
+            bot = n.nilai_angka * mk.sks
+            tsks += mk.sks; tpoin += bot
+            data.append([str(i), str(n.semester_diambil), mk.kode_mk, Paragraph(mk.nama_matakuliah, styles["BodyText"]), str(mk.sks), n.nilai_huruf, f"{n.nilai_angka:.2f}"])
+
+        ipk = tpoin/tsks if tsks > 0 else 0
+        t = Table(data, colWidths=[0.4*inch, 0.5*inch, 1.0*inch, 2.8*inch, 0.5*inch, 0.6*inch, 0.6*inch])
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.grey),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#2C3E50")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('ALIGN', (3,1), (3,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0,0), (-1,0), 12),
-            ('GRID', (0,0), (-1,-1), 1, colors.black)
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ]))
-        elements.append(t)
-        doc.build(elements)
-        QMessageBox.information(self, "PDF", "Transkrip berhasil dicetak!")
+        elements.append(t); elements.append(Spacer(1, 20))
+
+        sum_data = [
+            ["Total SKS", f": {tsks}"],
+            ["IPK", f": {ipk:.2f}"],
+            ["Predikat", f": {'Cum Laude' if ipk > 3.5 else 'Sangat Memuaskan' if ipk > 3.0 else 'Memuaskan'}"]
+        ]
+        elements.append(Table(sum_data, hAlign='LEFT'))
+        
+        try:
+            doc.build(elements)
+            log_activity(self.username, "EXPORT", "Transkrip", f"PDF {mhs.nim}")
+            QMessageBox.information(self, "Sukses", "Transkrip Disimpan")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
 class AuditLogWidget(QWidget):
     def __init__(self):
