@@ -452,6 +452,8 @@ class MahasiswaWidget(QWidget):
             pd.DataFrame(data, columns=["NIM","Nama","Prodi","LP","Thn","Tgl","Status","Doswal"]).to_excel(path, index=False)
 
 class DosenWidget(QWidget):
+    JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
+    
     def __init__(self, username):
         super().__init__()
         self.username = username
@@ -462,7 +464,16 @@ class DosenWidget(QWidget):
         layout = QVBoxLayout(self); layout.setContentsMargins(20,20,20,20)
         card = QFrame(); card.setObjectName("table_frame"); add_shadow(card)
         l = QVBoxLayout(card)
-        l.addWidget(QLabel("👨‍🏫 Data Dosen", styleSheet="font-size:18px; font-weight:bold"))
+        
+        th = QHBoxLayout()
+        th.addWidget(QLabel("👨‍🏫 Data Dosen", styleSheet="font-size:18px; font-weight:bold"))
+        th.addStretch()
+        
+        b_imp = QPushButton("Import Excel"); b_imp.setObjectName("btn_export"); b_imp.clicked.connect(self.import_xls)
+        b_exp = QPushButton("Export Excel"); b_exp.setObjectName("btn_export"); b_exp.clicked.connect(self.export_xls)
+        
+        th.addWidget(b_imp); th.addWidget(b_exp)
+        l.addLayout(th)
         
         self.table = QTableWidget(); self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["NIDN", "Nama", "Gender", "Jabatan", "Email"])
@@ -483,6 +494,48 @@ class DosenWidget(QWidget):
             self.table.setItem(i,3,QTableWidgetItem(d.jabatan_akademik))
             self.table.setItem(i,4,QTableWidgetItem(d.email))
         db.close()
+
+    def import_xls(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Pilih File Excel", "", "Excel Files (*.xlsx *.xls)")
+        if not path: return
+        try:
+            df = pd.read_excel(path).astype(str)
+            req = ["NIDN", "Nama", "Gender", "Jabatan Akademik", "Email"]
+            if not all(col in df.columns for col in req):
+                QMessageBox.critical(self, "Error", "Format Excel salah. Pastikan kolom: " + ", ".join(req))
+                return
+            
+            db = SessionLocal()
+            added, skipped = 0, 0
+            for _, r in df.iterrows():
+                nidn, email = r["NIDN"], r["Email"]
+                if db.query(Dosen).filter((Dosen.nidn==nidn)|(Dosen.email==email)).first():
+                    skipped += 1; continue
+                
+                if r["Jabatan Akademik"] not in self.JABATAN_LIST:
+                    skipped += 1; continue
+                    
+                if r["Gender"] not in ['L', 'P']:
+                    skipped += 1; continue
+                
+                db.add(Dosen(nidn=nidn, nama=r["Nama"], gender=r["Gender"], jabatan_akademik=r["Jabatan Akademik"], email=email))
+                added += 1
+            db.commit(); db.close(); self.load_data()
+            QMessageBox.information(self, "Sukses", f"Import: {added} masuk, {skipped} dilewati.")
+        except Exception as e: QMessageBox.critical(self, "Error", str(e))
+
+    def export_xls(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Simpan File Excel", "export_dosen.xlsx", "Excel Files (*.xlsx)")
+        if not path: return
+        data = []
+        headers = [self.table.horizontalHeaderItem(c).text() for c in range(self.table.columnCount())]
+        for r in range(self.table.rowCount()):
+            row = [self.table.item(r, c).text() if self.table.item(r, c) else "" for c in range(self.table.columnCount())]
+            data.append(row)
+        try:
+            pd.DataFrame(data, columns=headers).to_excel(path, index=False)
+            QMessageBox.information(self, "Sukses", f"Data berhasil diekspor ke:\n{path}")
+        except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
 class MatakuliahWidget(QWidget):
     PRODI_LIST = ["--Pilih Prodi--"]
