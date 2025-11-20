@@ -330,7 +330,7 @@ class MahasiswaWidget(QWidget):
         
         b_rst = QPushButton("Reset Form"); b_rst.setObjectName("btn_bersihkan"); b_rst.clicked.connect(self.reset)
         fl.addWidget(b_rst)
-        self.form_card.setEnabled(False)
+        self.form_card.setEnabled(True)
         
         self.table_card = QFrame(); self.table_card.setObjectName("table_frame")
         add_shadow(self.table_card)
@@ -380,7 +380,6 @@ class MahasiswaWidget(QWidget):
         finally: db.close()
 
     def row_click(self, item):
-        self.form_card.setEnabled(True)
         r = item.row()
         self.sel_id = int(self.table.item(r,0).text())
         self.i_nim.setText(self.table.item(r,1).text())
@@ -391,7 +390,6 @@ class MahasiswaWidget(QWidget):
         tgl = self.table.item(r,6).text()
         if tgl != "-": self.i_tgl.setDate(QDate.fromString(tgl, "dd/MM/yyyy"))
         self.i_stat.setCurrentText(self.table.item(r,7).text())
-        
         doswal_name = self.table.item(r,8).text()
         if doswal_name and doswal_name != "-":
             self.i_doswal.setCurrentText(doswal_name)
@@ -399,43 +397,80 @@ class MahasiswaWidget(QWidget):
             self.i_doswal.setCurrentIndex(0)
 
     def reset(self):
-        self.sel_id = None; self.form_card.setEnabled(False)
+        self.sel_id = None
         self.i_nim.clear(); self.i_nama.clear(); self.i_prodi.clear(); self.i_thn.clear()
         self.i_doswal.setCurrentIndex(0)
 
     def save(self):
-        if not self.sel_id: return 
         db = SessionLocal()
         try:
-            m = db.query(Mahasiswa).get(self.sel_id)
-            if m:
-                m.nim = self.i_nim.text()
-                m.nama = self.i_nama.text()
-                m.program_studi = self.i_prodi.text()
-                m.gender = self.i_gen.currentText()
-                m.tahun_masuk = int(self.i_thn.text())
-                m.tanggal_lahir = self.i_tgl.date().toPython()
-                m.status = self.i_stat.currentText()
+            nim = self.i_nim.text()
+            nama = self.i_nama.text()
+            
+            if not self.sel_id:
+                if db.query(Mahasiswa).filter_by(nim=nim).first():
+                    QMessageBox.warning(self, "Error", "NIM sudah terdaftar")
+                    return
                 
-                current_idx = self.i_doswal.currentIndex()
-                if current_idx < 0:
-                    found_idx = self.i_doswal.findText(self.i_doswal.currentText())
-                    m.dosen_wali_id = self.i_doswal.itemData(found_idx) if found_idx >= 0 else None
-                else:
-                    m.dosen_wali_id = self.i_doswal.currentData()
+                doswal_id = self.i_doswal.currentData()
+                if self.i_doswal.currentIndex() < 0:
+                    found = self.i_doswal.findText(self.i_doswal.currentText())
+                    if found >= 0: doswal_id = self.i_doswal.itemData(found)
+                
+                new_mhs = Mahasiswa(
+                    nim=nim, nama=nama, program_studi=self.i_prodi.text(),
+                    gender=self.i_gen.currentText(), tahun_masuk=int(self.i_thn.text()),
+                    tanggal_lahir=self.i_tgl.date().toPython(), status=self.i_stat.currentText(),
+                    dosen_wali_id=doswal_id
+                )
+                db.add(new_mhs)
+                log_activity(self.username, "CREATE", "Mahasiswa", f"Tambah Mhs: {nim} - {nama}")
+                QMessageBox.information(self, "Sukses", "Data Berhasil Ditambahkan")
 
-                log_activity(self.username, "UPDATE", "Mahasiswa", f"NIM: {m.nim}")
-                db.commit(); self.load_data(); self.reset()
-                QMessageBox.information(self, "Sukses", "Data Disimpan")
-        except Exception as e: QMessageBox.critical(self, "Error", str(e))
-        finally: db.close()
+            else:
+                m = db.query(Mahasiswa).get(self.sel_id)
+                if m:
+                    m.nim = nim
+                    m.nama = nama
+                    m.program_studi = self.i_prodi.text()
+                    m.gender = self.i_gen.currentText()
+                    m.tahun_masuk = int(self.i_thn.text())
+                    m.tanggal_lahir = self.i_tgl.date().toPython()
+                    m.status = self.i_stat.currentText()
+                    
+                    doswal_id = self.i_doswal.currentData()
+                    if self.i_doswal.currentIndex() < 0:
+                        found = self.i_doswal.findText(self.i_doswal.currentText())
+                        if found >= 0: doswal_id = self.i_doswal.itemData(found)
+                    m.dosen_wali_id = doswal_id
+
+                    log_activity(self.username, "UPDATE", "Mahasiswa", f"Update Mhs: {nim} - {nama}")
+                    QMessageBox.information(self, "Sukses", "Data Berhasil Diupdate")
+            
+            db.commit()
+            self.load_data()
+            self.reset()
+        except Exception as e: 
+            db.rollback()
+            QMessageBox.critical(self, "Error", str(e))
+        finally: 
+            db.close()
 
     def delete(self):
         if self.sel_id and QMessageBox.question(self, "Hapus", "Yakin?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             db = SessionLocal()
-            db.delete(db.query(Mahasiswa).get(self.sel_id))
-            db.commit(); self.load_data(); self.reset()
-            db.close()
+            try:
+                m = db.query(Mahasiswa).get(self.sel_id)
+                if m:
+                    log_activity(self.username, "DELETE", "Mahasiswa", f"Hapus Mhs: {m.nim} - {m.nama}")
+                    db.delete(m)
+                    db.commit()
+                    self.load_data()
+                    self.reset()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+            finally:
+                db.close()
 
     def filter(self):
         t = self.search.text().lower()
@@ -454,6 +489,10 @@ class MahasiswaWidget(QWidget):
                     if not db.query(Mahasiswa).filter_by(nim=str(r['NIM'])).first():
                         db.add(Mahasiswa(nim=str(r['NIM']), nama=r['Nama'], program_studi=r['Prodi'], gender=r['Gender'], tahun_masuk=int(r['Tahun']), status='Aktif'))
                         c+=1
+                
+                if c > 0:
+                    log_activity(self.username, "IMPORT", "Mahasiswa", f"Import {c} data mahasiswa")
+                
                 db.commit(); db.close(); self.load_data()
                 QMessageBox.information(self, "Import", f"{c} Data Masuk")
             except Exception as e: QMessageBox.critical(self, "Error", str(e))
@@ -461,12 +500,15 @@ class MahasiswaWidget(QWidget):
     def export_xls(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export", "mahasiswa.xlsx", "*.xlsx")
         if path:
-            data = []
-            for r in range(self.table.rowCount()):
-                if not self.table.isRowHidden(r):
-                    row = [self.table.item(r, c).text() for c in range(1,9)]
-                    data.append(row)
-            pd.DataFrame(data, columns=["NIM","Nama","Prodi","LP","Thn","Tgl","Status","Doswal"]).to_excel(path, index=False)
+            try:
+                data = []
+                for r in range(self.table.rowCount()):
+                    if not self.table.isRowHidden(r):
+                        row = [self.table.item(r, c).text() for c in range(1,9)]
+                        data.append(row)
+                pd.DataFrame(data, columns=["NIM","Nama","Prodi","LP","Thn","Tgl","Status","Doswal"]).to_excel(path, index=False)
+                log_activity(self.username, "EXPORT", "Mahasiswa", "Export data mahasiswa ke Excel")
+            except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
 class DosenWidget(QWidget):
     JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
@@ -537,6 +579,10 @@ class DosenWidget(QWidget):
                 
                 db.add(Dosen(nidn=nidn, nama=r["Nama"], gender=r["Gender"], jabatan_akademik=r["Jabatan Akademik"], email=email))
                 added += 1
+            
+            if added > 0:
+                log_activity(self.username, "IMPORT", "Dosen", f"Import {added} data dosen")
+            
             db.commit(); db.close(); self.load_data()
             QMessageBox.information(self, "Sukses", f"Import: {added} masuk, {skipped} dilewati.")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
@@ -551,6 +597,7 @@ class DosenWidget(QWidget):
             data.append(row)
         try:
             pd.DataFrame(data, columns=headers).to_excel(path, index=False)
+            log_activity(self.username, "EXPORT", "Dosen", "Export data dosen ke Excel")
             QMessageBox.information(self, "Sukses", f"Data berhasil diekspor ke:\n{path}")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
@@ -589,7 +636,7 @@ class MatakuliahWidget(QWidget):
         bh.addWidget(b_simpan); bh.addWidget(b_hapus)
         fl.addLayout(bh)
         b_rst = QPushButton("Reset"); b_rst.setObjectName("btn_bersihkan"); b_rst.clicked.connect(self.reset)
-        fl.addWidget(b_rst); self.form_card.setEnabled(False)
+        fl.addWidget(b_rst); self.form_card.setEnabled(True)
 
         self.table_card = QFrame(); self.table_card.setObjectName("table_frame")
         add_shadow(self.table_card)
@@ -643,7 +690,6 @@ class MatakuliahWidget(QWidget):
         finally: db.close()
 
     def row_click(self, item):
-        self.form_card.setEnabled(True)
         r = item.row()
         self.selected_id = int(self.table.item(r,0).text())
         self.i_kode.setText(self.table.item(r,1).text())
@@ -653,31 +699,57 @@ class MatakuliahWidget(QWidget):
         self.i_prodi.setCurrentText(self.table.item(r,5).text())
 
     def reset(self):
-        self.selected_id = None; self.form_card.setEnabled(False)
+        self.selected_id = None
         for w in [self.i_kode, self.i_nama, self.i_sks, self.i_smt]: w.clear()
         self.i_prodi.setCurrentIndex(0)
 
     def save(self):
-        if not self.selected_id: return
         db = SessionLocal()
         try:
-            m = db.query(Matakuliah).get(self.selected_id)
-            if m:
-                m.kode_mk = self.i_kode.text()
-                m.nama_matakuliah = self.i_nama.text()
-                m.sks = int(self.i_sks.text())
-                m.semester = int(self.i_smt.text())
-                m.program_studi = self.i_prodi.currentText()
-                db.commit(); self.load_data(); self.reset(); QMessageBox.information(self, "Sukses", "Data disimpan.")
-        except Exception as e: QMessageBox.critical(self, "Error", str(e))
+            kode = self.i_kode.text()
+            nama = self.i_nama.text()
+            
+            # CREATE
+            if not self.selected_id:
+                if db.query(Matakuliah).filter_by(kode_mk=kode).first():
+                    QMessageBox.warning(self, "Error", "Kode MK sudah ada")
+                    return
+                
+                db.add(Matakuliah(
+                    kode_mk=kode, nama_matakuliah=nama,
+                    sks=int(self.i_sks.text()), semester=int(self.i_smt.text()),
+                    program_studi=self.i_prodi.currentText()
+                ))
+                log_activity(self.username, "CREATE", "Matakuliah", f"Tambah MK: {kode} - {nama}")
+                QMessageBox.information(self, "Sukses", "Data Disimpan")
+                
+            # UPDATE
+            else:
+                m = db.query(Matakuliah).get(self.selected_id)
+                if m:
+                    m.kode_mk = kode
+                    m.nama_matakuliah = nama
+                    m.sks = int(self.i_sks.text())
+                    m.semester = int(self.i_smt.text())
+                    m.program_studi = self.i_prodi.currentText()
+                    log_activity(self.username, "UPDATE", "Matakuliah", f"Update MK: {kode} - {nama}")
+                    QMessageBox.information(self, "Sukses", "Data Diupdate")
+
+            db.commit(); self.load_data(); self.reset()
+        except Exception as e: 
+            db.rollback(); QMessageBox.critical(self, "Error", str(e))
         finally: db.close()
 
     def delete(self):
         if self.selected_id and QMessageBox.question(self, "Hapus", "Yakin?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             db = SessionLocal()
-            db.delete(db.query(Matakuliah).get(self.selected_id))
-            db.commit(); self.load_data(); self.reset()
-            db.close()
+            try:
+                m = db.query(Matakuliah).get(self.selected_id)
+                if m:
+                    log_activity(self.username, "DELETE", "Matakuliah", f"Hapus MK: {m.kode_mk}")
+                    db.delete(m)
+                    db.commit(); self.load_data(); self.reset()
+            finally: db.close()
 
     def filter(self):
         t = self.search.text().lower()
@@ -723,6 +795,10 @@ class MatakuliahWidget(QWidget):
                         ))
                         added += 1
                     except: pass
+            
+            if added > 0:
+                log_activity(self.username, "IMPORT", "Matakuliah", f"Import {added} matakuliah")
+
             db.commit(); db.close(); self.load_data()
             QMessageBox.information(self, "Import", f"Berhasil: {added} data.")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
@@ -738,6 +814,7 @@ class MatakuliahWidget(QWidget):
                 data.append(row)
         try:
             pd.DataFrame(data, columns=headers).to_excel(path, index=False)
+            log_activity(self.username, "EXPORT", "Matakuliah", "Export data matakuliah ke Excel")
             QMessageBox.information(self, "Sukses", "Export berhasil.")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
@@ -995,6 +1072,7 @@ class NilaiWidget(QWidget):
             QMessageBox.information(self, "Sukses", "Transkrip Disimpan")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+            
 
 class AuditLogWidget(QWidget):
     def __init__(self):
