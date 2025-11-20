@@ -1074,6 +1074,260 @@ class NilaiWidget(QWidget):
             QMessageBox.critical(self, "Error", str(e))
             
 
+class PenggunaWidget(QWidget):
+    ROLE_LIST = ["Admin Akademik", "Kepala Jurusan", "Rektor", "Admin Manajemen"]
+    
+    def __init__(self, username): 
+        super().__init__()
+        self.current_username = username 
+        self.selected_pengguna_id = None
+        self.initUI()
+        self.load_data()
+
+    def initUI(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+
+        # --- Form Section (Kiri) ---
+        self.form_card = QFrame()
+        self.form_card.setObjectName("form_frame")
+        self.form_card.setFixedWidth(320)
+        add_shadow(self.form_card)
+        
+        fl = QVBoxLayout(self.form_card)
+        fl.setContentsMargins(20, 20, 20, 20)
+        fl.setSpacing(15)
+        
+        fl.addWidget(QLabel("👤 Manajemen Pengguna", styleSheet="font-size:18px; font-weight:bold; border:none;"))
+
+        f_grid = QFormLayout()
+        f_grid.setVerticalSpacing(12)
+        
+        self.input_username = QLineEdit()
+        self.input_username.setPlaceholderText("Username")
+        
+        self.input_password = QLineEdit()
+        self.input_password.setEchoMode(QLineEdit.Password)
+        self.input_password.setPlaceholderText("Isi untuk ubah/buat baru")
+        
+        self.input_role = QComboBox()
+        self.input_role.addItems(self.ROLE_LIST)
+
+        f_grid.addRow("Username", self.input_username)
+        f_grid.addRow("Password", self.input_password)
+        f_grid.addRow("Role", self.input_role)
+        
+        fl.addLayout(f_grid)
+        fl.addStretch()
+
+        # Buttons
+        bh = QHBoxLayout()
+        self.btn_simpan = QPushButton("Simpan")
+        self.btn_simpan.setObjectName("btn_simpan")
+        self.btn_simpan.clicked.connect(self.save_data)
+        
+        self.btn_hapus = QPushButton("Hapus")
+        self.btn_hapus.setObjectName("btn_hapus")
+        self.btn_hapus.clicked.connect(self.delete_data)
+        
+        bh.addWidget(self.btn_simpan)
+        bh.addWidget(self.btn_hapus)
+        fl.addLayout(bh)
+
+        self.btn_bersihkan = QPushButton("Reset Form")
+        self.btn_bersihkan.setObjectName("btn_bersihkan")
+        self.btn_bersihkan.clicked.connect(self.clear_form)
+        fl.addWidget(self.btn_bersihkan)
+
+        # --- Table Section (Kanan) ---
+        self.table_card = QFrame()
+        self.table_card.setObjectName("table_frame")
+        add_shadow(self.table_card)
+        
+        tl = QVBoxLayout(self.table_card)
+        tl.setContentsMargins(20, 20, 20, 20)
+
+        # Search Bar
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Cari berdasarkan Username atau Role...")
+        self.search_input.textChanged.connect(self.filter_table)
+        tl.addWidget(self.search_input)
+
+        # Table
+        self.table_pengguna = QTableWidget()
+        self.table_pengguna.setColumnCount(4)
+        self.table_pengguna.setHorizontalHeaderLabels(["#", "ID", "Username", "Role"])
+        self.table_pengguna.verticalHeader().hide()
+        self.table_pengguna.setColumnHidden(1, True) # Sembunyikan ID
+        self.table_pengguna.setColumnWidth(0, 50)
+        self.table_pengguna.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table_pengguna.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table_pengguna.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table_pengguna.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table_pengguna.setAlternatingRowColors(True)
+        self.table_pengguna.itemClicked.connect(self.table_row_clicked)
+        
+        tl.addWidget(self.table_pengguna)
+
+        # Add to main layout
+        layout.addWidget(self.form_card)
+        layout.addWidget(self.table_card)
+
+    def filter_table(self):
+        search_text = self.search_input.text().lower()
+        for row in range(self.table_pengguna.rowCount()):
+            username_item = self.table_pengguna.item(row, 2)  
+            role_item = self.table_pengguna.item(row, 3) 
+            if username_item and role_item:
+                username_text = username_item.text().lower()
+                role_text = role_item.text().lower()
+                if search_text in username_text or search_text in role_text:
+                    self.table_pengguna.setRowHidden(row, False)
+                else:
+                    self.table_pengguna.setRowHidden(row, True)
+    
+    def load_data(self):
+        if 'SessionLocal' not in globals() or SessionLocal is None: return
+        db_session = SessionLocal()
+        try:
+            semua_pengguna = db_session.query(Pengguna).all()
+            self.table_pengguna.setRowCount(0) 
+            for row_position, user in enumerate(semua_pengguna):
+                self.table_pengguna.insertRow(row_position)
+                
+                nomor_item = QTableWidgetItem(str(row_position + 1))
+                nomor_item.setTextAlignment(Qt.AlignCenter)
+                
+                self.table_pengguna.setItem(row_position, 0, nomor_item) 
+                self.table_pengguna.setItem(row_position, 1, QTableWidgetItem(str(user.id)))
+                self.table_pengguna.setItem(row_position, 2, QTableWidgetItem(user.username))
+                self.table_pengguna.setItem(row_position, 3, QTableWidgetItem(user.role))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Gagal memuat data: {e}")
+        finally:
+            db_session.close()
+
+    def save_data(self):
+        username = self.input_username.text()
+        password = self.input_password.text() 
+        role = self.input_role.currentText()
+        
+        if not username:
+            QMessageBox.warning(self, "Error", "Username tidak boleh kosong.")
+            return
+            
+        if 'SessionLocal' not in globals() or SessionLocal is None: return
+        db_session = SessionLocal()
+        
+        try:
+            # UPDATE DATA
+            if self.selected_pengguna_id:
+                user = db_session.query(Pengguna).get(self.selected_pengguna_id)
+                if user:
+                    # Cek duplikasi username jika diganti
+                    if user.username != username:
+                        username_ada = db_session.query(Pengguna).filter_by(username=username).first()
+                        if username_ada:
+                            QMessageBox.warning(self, "Error", f"Username '{username}' sudah terdaftar.")
+                            return
+                    
+                    # Update password hanya jika diisi
+                    if password:
+                        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+                        user.hashed_password = hashed_password.decode('utf-8')
+                    
+                    user.username = username
+                    user.role = role
+                    log_activity(self.current_username, "UPDATE", "Pengguna", f"Update User: {username}")
+                    QMessageBox.information(self, "Sukses", "Data berhasil diperbarui.")
+            
+            # CREATE DATA
+            else:
+                if not password:
+                    QMessageBox.warning(self, "Error", "Password wajib diisi untuk pengguna baru.")
+                    return
+                
+                username_ada = db_session.query(Pengguna).filter_by(username=username).first()
+                if username_ada:
+                    QMessageBox.warning(self, "Error", f"Username '{username}' sudah terdaftar.")
+                    return
+                
+                hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+                user_baru = Pengguna(
+                    username=username,
+                    hashed_password=hashed_password.decode('utf-8'),
+                    role=role
+                )
+                db_session.add(user_baru)
+                log_activity(self.current_username, "CREATE", "Pengguna", f"Buat User: {username}")
+                QMessageBox.information(self, "Sukses", "Pengguna berhasil dibuat.")
+            
+            db_session.commit()
+            self.load_data()
+            self.clear_form()
+            
+        except Exception as e:
+            db_session.rollback()
+            QMessageBox.critical(self, "Error", str(e))
+        finally:
+            db_session.close()
+
+    def delete_data(self):
+        if not self.selected_pengguna_id:
+            QMessageBox.warning(self, "Error", "Pilih pengguna yang ingin dihapus.")
+            return
+            
+        row = self.table_pengguna.currentRow()
+        username_to_delete = self.table_pengguna.item(row, 2).text()
+        
+        if username_to_delete == "admin":
+            QMessageBox.warning(self, "Error", "Akun 'admin' utama tidak boleh dihapus.")
+            return
+        if username_to_delete == self.current_username:
+            QMessageBox.warning(self, "Error", "Anda tidak dapat menghapus akun sendiri.")
+            return
+            
+        if QMessageBox.question(self, "Hapus", f"Yakin hapus user '{username_to_delete}'?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+            db_session = SessionLocal()
+            try:
+                user = db_session.query(Pengguna).get(self.selected_pengguna_id)
+                if user:
+                    db_session.delete(user)
+                    log_activity(self.current_username, "DELETE", "Pengguna", f"Hapus User: {username_to_delete}")
+                    db_session.commit()
+                    self.load_data()
+                    self.clear_form()
+            except Exception as e:
+                db_session.rollback()
+                QMessageBox.critical(self, "Error", str(e))
+            finally:
+                db_session.close()
+
+    def clear_form(self):
+        self.selected_pengguna_id = None 
+        self.input_username.clear()
+        self.input_password.clear()
+        self.input_role.setCurrentIndex(0) 
+        self.input_username.setReadOnly(False)
+        self.input_password.setPlaceholderText("Isi untuk ubah/buat baru")
+
+    def table_row_clicked(self, item):
+        row = item.row()
+        self.selected_pengguna_id = int(self.table_pengguna.item(row, 1).text())
+        username = self.table_pengguna.item(row, 2).text()
+        role = self.table_pengguna.item(row, 3).text()
+        
+        self.input_username.setText(username)
+        self.input_role.setCurrentText(role)
+        self.input_password.clear()
+        self.input_password.setPlaceholderText("Kosongkan jika tidak ingin mengubah password")
+        
+        if username == "admin":
+            self.input_username.setReadOnly(True)
+        else:
+            self.input_username.setReadOnly(False)
+
 class AuditLogWidget(QWidget):
     def __init__(self):
         super().__init__()
@@ -1116,6 +1370,7 @@ class MainWidget(QWidget):
     def __init__(self, username, role, is_dark):
         super().__init__()
         self.username = username
+        self.pengguna_page = PenggunaWidget(username)
         self.role = role
         self.is_dark = is_dark
         
@@ -1131,7 +1386,7 @@ class MainWidget(QWidget):
         self.stack.addWidget(MatakuliahWidget(username))
         self.stack.addWidget(NilaiWidget(username))
         self.stack.addWidget(AuditLogWidget())
-        
+        self.stack.addWidget(self.pengguna_page)
         layout.addWidget(self.stack)
 
         self.update_dashboard_stats() 
@@ -1153,6 +1408,8 @@ class MainWidget(QWidget):
         l.addWidget(btn("📚 Matakuliah", 3))
         l.addWidget(btn("📝 Penilaian", 4))
         l.addWidget(btn("📜 Log Sistem", 5))
+        if self.role == "Admin Manajemen":
+            l.addWidget(btn("👤 Pengguna", 6))
         l.addStretch()
         
         bout = QPushButton("🚪 Logout")
@@ -1172,7 +1429,8 @@ class MainWidget(QWidget):
         
         head_layout = QHBoxLayout()
         color = "#F1F5F9" if self.is_dark else "#1E293B"
-        head_layout.addWidget(QLabel(f"👋 Selamat Datang, {self.username}", styleSheet=f"font-size:28px; font-weight:800; color:{color}"))
+        
+        head_layout.addWidget(QLabel(f"👋 Selamat Datang, {self.username} ({self.role})", styleSheet=f"font-size:28px; font-weight:800; color:{color}"))
         
         btn_pdf = QPushButton("Export PDF")
         btn_pdf.setObjectName("btn_simpan")
