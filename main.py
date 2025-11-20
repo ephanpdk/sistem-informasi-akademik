@@ -86,6 +86,13 @@ def log_activity(username, action, table, details):
         db.rollback()
     finally:
         db.close()
+
+class ClickableCard(QFrame):
+    clicked = Signal() # Sinyal kustom saat diklik
+
+    def mousePressEvent(self, event):
+        self.clicked.emit() # Pancarkan sinyal
+        super().mousePressEvent(event)
 # ====================================================================
 # --- KARTU 1: Halaman Login ---
 # ====================================================================
@@ -2732,7 +2739,6 @@ class MainWidget(QWidget):
                 self.trend_series.append(current_year, 0)
                 self.trend_axis_y.setRange(0, 10)
 
-            # ... (SISA KODE KE BAWAH TIDAK PERLU DIUBAH) ...
             # === 3. GRAFIK RATA-RATA IPK (BAR) ===
             self.gpa_series.clear()
             raw_gpa = db.query(Mahasiswa.program_studi, Nilai.nilai_angka, Matakuliah.sks)\
@@ -2822,6 +2828,67 @@ class MainWidget(QWidget):
                 
             self.dist_series.append(bar_dist)
             self.dist_axis_y.setRange(0, max(10, max(buckets) + 5))
+            
+            # === A. DATA JABATAN DOSEN (Refresh Data) ===
+            self.jabatan_series.clear()
+            jabatan_data = db.query(Dosen.jabatan_akademik, func.count(Dosen.id)).group_by(Dosen.jabatan_akademik).all()
+            colors_jabatan = ["#3498DB", "#E67E22", "#9B59B6", "#2ECC71", "#F1C40F"]
+            
+            total_dosen_jab = sum([c for _, c in jabatan_data])
+            for i, (jab, cnt) in enumerate(jabatan_data):
+                if not jab: jab = "Tanpa Jabatan"
+                pct = (cnt/total_dosen_jab)*100 if total_dosen_jab else 0
+                sl = self.jabatan_series.append(f"{jab}: {cnt}", cnt)
+                sl.setLabelVisible(True)
+                sl.setColor(QColor(colors_jabatan[i % len(colors_jabatan)]))
+
+            # === B. DATA GENDER DOSEN ===
+            self.dosen_gender_series.clear()
+            dosen_gen_data = db.query(Dosen.gender, func.count(Dosen.id)).group_by(Dosen.gender).all()
+            color_map_gen = {'L': "#2980B9", 'P': "#E91E63"} # Biru & Pink
+            
+            total_dosen_gen = sum([c for _, c in dosen_gen_data])
+            for gen, cnt in dosen_gen_data:
+                label_gen = "Laki-laki" if gen == 'L' else "Perempuan"
+                pct = (cnt/total_dosen_gen)*100 if total_dosen_gen else 0
+                sl = self.dosen_gender_series.append(f"{label_gen} ({pct:.1f}%)", cnt)
+                sl.setLabelVisible(True)
+                if gen in color_map_gen: sl.setColor(QColor(color_map_gen[gen]))
+
+            # === C. DATA TOP DOSEN WALI ===
+            self.doswal_series.clear()
+            self.axis_x_doswal.clear()
+            
+            # Query: Join Dosen & Mahasiswa, Group by Dosen, Count Mahasiswa
+            top_doswal = db.query(Dosen.nama, func.count(Mahasiswa.id))\
+                           .join(Mahasiswa, Dosen.id == Mahasiswa.dosen_wali_id)\
+                           .filter(Mahasiswa.status == 'Aktif')\
+                           .group_by(Dosen.id)\
+                           .order_by(func.count(Mahasiswa.id).desc())\
+                           .limit(5).all()
+            
+            bar_set_doswal = QBarSet("Mahasiswa")
+            bar_set_doswal.setColor(QColor("#16A085")) # Warna Teal
+            
+            cats_doswal = []
+            max_val_doswal = 0
+            
+            if top_doswal:
+                for nama, jumlah in top_doswal:
+                    # Persingkat nama jika terlalu panjang untuk grafik
+                    nama_display = nama.split(',')[0] if ',' in nama else nama 
+                    if len(nama_display) > 15: nama_display = nama_display[:12] + "..."
+                    
+                    bar_set_doswal.append(jumlah)
+                    cats_doswal.append(nama_display)
+                    if jumlah > max_val_doswal: max_val_doswal = jumlah
+            else:
+                bar_set_doswal.append(0)
+                cats_doswal.append("-")
+
+            self.doswal_series.append(bar_set_doswal)
+            self.axis_x_doswal.append(cats_doswal)
+            self.axis_y_doswal.setRange(0, max(5, max_val_doswal + 2))
 
         except Exception as e:
             print(f"Gagal memuat statistik dashboard: {e}")
@@ -2941,7 +3008,54 @@ class MainWidget(QWidget):
         chart_view.setMinimumHeight(400)
         
         return chart_view
+    
+    # --- GRAFIK BARU: GENDER DOSEN ---
+    def create_dosen_gender_chart(self):
+        self.dosen_gender_series = QPieSeries()
+        self.dosen_gender_series.setHoleSize(0.40) # Donut style
 
+        chart = QChart()
+        chart.addSeries(self.dosen_gender_series)
+        chart.setTitle("Rasio Gender Dosen")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignBottom)
+        
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setMinimumHeight(400)
+        return chart_view
+
+    # --- GRAFIK BARU: BEBAN DOSEN WALI (TOP 5) ---
+    def create_top_doswal_chart(self):
+        self.doswal_series = QBarSeries()
+        self.doswal_series.setLabelsVisible(True)
+        self.doswal_series.setLabelsPosition(QBarSeries.LabelsCenter)
+
+        chart = QChart()
+        chart.addSeries(self.doswal_series)
+        chart.setTitle("Top 5 Dosen dengan Mahasiswa Wali Terbanyak")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+
+        self.axis_x_doswal = QBarCategoryAxis()
+        self.axis_x_doswal.setTitleText("Nama Dosen")
+        chart.addAxis(self.axis_x_doswal, Qt.AlignBottom)
+        self.doswal_series.attachAxis(self.axis_x_doswal)
+
+        self.axis_y_doswal = QValueAxis()
+        self.axis_y_doswal.setTitleText("Jumlah Mahasiswa")
+        self.axis_y_doswal.setLabelFormat("%d")
+        chart.addAxis(self.axis_y_doswal, Qt.AlignLeft)
+        self.doswal_series.attachAxis(self.axis_y_doswal)
+
+        chart.legend().setVisible(False) # Tidak perlu legenda untuk bar simple
+
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setMinimumHeight(400)
+        return chart_view
+    
     def export_dashboard_to_pdf(self):
         # 1. Pilih Lokasi Penyimpanan
         file_path, _ = QFileDialog.getSaveFileName(
@@ -3007,7 +3121,6 @@ class MainWidget(QWidget):
 
     def create_home_page(self):
         content_widget = QWidget()
-        # Ubah background menjadi putih bersih
         content_widget.setStyleSheet("QWidget { background-color: #FFFFFF; }")
         
         content_layout = QVBoxLayout(content_widget)
@@ -3015,124 +3128,149 @@ class MainWidget(QWidget):
         content_layout.setAlignment(Qt.AlignTop)
         content_layout.setContentsMargins(40, 40, 40, 40)
 
-        # --- 1. HEADER (Hanya Selamat Datang) ---
-        self.welcome_label = QLabel(f"Selamat Datang, {self.current_username}!")
-        self.welcome_label.setAlignment(Qt.AlignCenter)
-        # Margin bottom diatur 30px agar ada jarak yang pas ke kartu di bawahnya
-        self.welcome_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #000000; margin-bottom: 30px;")
+        # --- 1. HEADER ---
+        header_layout = QHBoxLayout()
         
-        content_layout.addWidget(self.welcome_label)
-        # (Label Role/Login Sebagai telah dihapus di sini)
+        self.welcome_label = QLabel(f"Selamat Datang, {self.current_username}!")
+        self.welcome_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #000000;")
+        
+        self.btn_reset_filter = QPushButton("Tampilkan Semua")
+        self.btn_reset_filter.setCursor(Qt.PointingHandCursor)
+        self.btn_reset_filter.hide()
+        self.btn_reset_filter.setStyleSheet("""
+            QPushButton { background-color: #34495E; color: white; border-radius: 5px; padding: 8px 15px; font-weight: bold;}
+            QPushButton:hover { background-color: #2C3E50; }
+        """)
+        self.btn_reset_filter.clicked.connect(lambda: self.filter_dashboard("ALL"))
 
-        # --- 2. AREA KARTU STATISTIK & TOMBOL EXPORT ---
+        header_layout.addWidget(self.welcome_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.btn_reset_filter)
+        
+        content_layout.addLayout(header_layout)
+        content_layout.addSpacing(20)
+
+        # --- 2. AREA KARTU STATISTIK ---
         stats_container = QHBoxLayout()
         stats_container.setSpacing(20)
         stats_container.setContentsMargins(0, 0, 0, 20)
 
-        # Fungsi Helper untuk Membuat Kartu
-        def create_card(icon_emoji, object_name):
-            card = QFrame()
+        def create_card(icon_emoji, object_name, label_text):
+            card = ClickableCard() 
+            card.setCursor(Qt.PointingHandCursor)
             card.setStyleSheet("""
-                QFrame {
+                ClickableCard {
                     background-color: #FFFFFF;
                     border: 1px solid #E0E0E0;
                     border-radius: 15px;
                 }
-                QFrame:hover {
-                    border: 1px solid #70AD47; /* Efek hover hijau */
+                ClickableCard:hover {
+                    border: 2px solid #70AD47;
+                    background-color: #F9FFF9;
                 }
             """)
-            card.setFixedSize(250, 120) # Ukuran kartu fix
+            card.setFixedSize(250, 120)
 
             layout = QVBoxLayout(card)
             layout.setAlignment(Qt.AlignCenter)
             layout.setSpacing(5)
 
-            # Ikon (Menggunakan Emoji Font Besar)
             lbl_icon = QLabel(icon_emoji)
             lbl_icon.setAlignment(Qt.AlignCenter)
-            lbl_icon.setStyleSheet("font-size: 40px; color: #70AD47; border: none;") # Warna Hijau
+            lbl_icon.setStyleSheet("font-size: 40px; color: #70AD47; border: none; background: transparent;")
             
-            # Label Statistik (Akan diisi angka nanti)
             lbl_value = QLabel("Loading...")
             lbl_value.setObjectName(object_name)
             lbl_value.setAlignment(Qt.AlignCenter)
-            lbl_value.setStyleSheet("font-size: 14px; font-weight: bold; color: #333333; border: none;")
+            lbl_value.setStyleSheet("font-size: 16px; font-weight: bold; color: #333333; border: none; background: transparent;")
             
+            lbl_title = QLabel(label_text)
+            lbl_title.setAlignment(Qt.AlignCenter)
+            lbl_title.setStyleSheet("font-size: 12px; color: #777; border: none; background: transparent;")
+
             layout.addWidget(lbl_icon)
             layout.addWidget(lbl_value)
+            layout.addWidget(lbl_title)
             
             return card, lbl_value
 
-        # -- Kartu 1: Mahasiswa --
-        card_mhs, self.label_stats_mhs = create_card("🎓", "stats_mhs")
-        stats_container.addWidget(card_mhs)
+        self.card_mhs, self.label_stats_mhs = create_card("🎓", "stats_mhs", "Mahasiswa")
+        self.card_mhs.clicked.connect(lambda: self.filter_dashboard("MAHASISWA"))
+        stats_container.addWidget(self.card_mhs)
 
-        # -- Kartu 2: Dosen --
-        card_dosen, self.label_stats_dosen = create_card("💼", "stats_dosen")
-        stats_container.addWidget(card_dosen)
+        self.card_dosen, self.label_stats_dosen = create_card("💼", "stats_dosen", "Dosen")
+        self.card_dosen.clicked.connect(lambda: self.filter_dashboard("DOSEN"))
+        stats_container.addWidget(self.card_dosen)
 
-        # -- Kartu 3: Prodi --
-        card_prodi, self.label_stats_prodi = create_card("🏛️", "stats_prodi")
-        stats_container.addWidget(card_prodi)
+        self.card_prodi, self.label_stats_prodi = create_card("🏛️", "stats_prodi", "Program Studi")
+        self.card_prodi.clicked.connect(lambda: self.filter_dashboard("PRODI"))
+        stats_container.addWidget(self.card_prodi)
 
-        # Spacer (Pemisah agar tombol Export terdorong ke kanan)
         stats_container.addStretch()
 
-        # -- Tombol Export PDF --
         self.btn_export_pdf = QPushButton("Export PDF")
         self.btn_export_pdf.setCursor(Qt.PointingHandCursor)
         self.btn_export_pdf.setFixedSize(150, 50)
         self.btn_export_pdf.setStyleSheet("""
-            QPushButton {
-                background-color: #70AD47; /* Warna Hijau */
-                color: white; 
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 8px; 
-                border: none;
-            }
+            QPushButton { background-color: #70AD47; color: white; font-weight: bold; border-radius: 8px; border: none; }
             QPushButton:hover { background-color: #5D9138; }
-            QPushButton:pressed { background-color: #4A752C; }
         """)
         self.btn_export_pdf.clicked.connect(self.export_dashboard_to_pdf)
-        
         stats_container.addWidget(self.btn_export_pdf)
 
         content_layout.addLayout(stats_container)
 
-        # --- 3. AREA GRAFIK ---
-        charts_layout = QVBoxLayout()
-        charts_layout.setSpacing(40)
+        # --- 3. AREA GRAFIK (MODIFIKASI AGAR VERTIKAL) ---
+        self.charts_layout = QVBoxLayout()
+        self.charts_layout.setSpacing(40) # Jarak antar grafik vertikal
 
+        # --- INITIALIZE CHART VIEWS ---
+        # [A] Grafik Mahasiswa
         self.chart_view = self.create_trend_chart()
-        self.chart_view.setMinimumHeight(400)
-        charts_layout.addWidget(self.chart_view)
-        
         self.gender_chart_view = self.create_gender_chart()
-        self.gender_chart_view.setMinimumHeight(400)
-        charts_layout.addWidget(self.gender_chart_view)
-
-        row_34 = QHBoxLayout()
-        row_34.setSpacing(20)
-        
-        self.gpa_chart_view = self.create_gpa_chart()
-        self.gpa_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        row_34.addWidget(self.gpa_chart_view)
-
         self.status_chart_view = self.create_status_chart()
-        self.status_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        row_34.addWidget(self.status_chart_view)
-
-        charts_layout.addLayout(row_34)
-
         self.dist_chart_view = self.create_gpa_dist_chart()
-        self.dist_chart_view.setMinimumHeight(400)
-        charts_layout.addWidget(self.dist_chart_view)
 
-        content_layout.addLayout(charts_layout)
+        # [B] Grafik Dosen
+        if hasattr(self, 'create_jabatan_dosen_chart'):
+            self.jabatan_chart_view = self.create_jabatan_dosen_chart()
+        else:
+            self.jabatan_chart_view = QWidget()
+            
+        if hasattr(self, 'create_dosen_gender_chart'):
+            self.dosen_gender_view = self.create_dosen_gender_chart()
+        else:
+            self.dosen_gender_view = QWidget()
+
+        if hasattr(self, 'create_top_doswal_chart'):
+            self.doswal_chart_view = self.create_top_doswal_chart()
+        else:
+            self.doswal_chart_view = QWidget()
+
+        # [C] Grafik Prodi
+        self.gpa_chart_view = self.create_gpa_chart()
+
+        # --- MENYUSUN LAYOUT SECARA BERURUTAN KE BAWAH (VERTIKAL) ---
+        # Kita menambahkan semuanya langsung ke `charts_layout` (QVBoxLayout)
+        # Tanpa menggunakan QHBoxLayout (Horizontal) pembungkus.
+
+        # 1. Kelompok Mahasiswa
+        self.charts_layout.addWidget(self.chart_view)       # Tren
+        self.charts_layout.addWidget(self.gender_chart_view)# Gender Mhs
+        self.charts_layout.addWidget(self.status_chart_view)# Status Mhs
+        self.charts_layout.addWidget(self.dist_chart_view)  # Sebaran IPK
+
+        # 2. Kelompok Dosen (SEKARANG VERTIKAL)
+        self.charts_layout.addWidget(self.jabatan_chart_view) # Pie Chart Jabatan
+        self.charts_layout.addWidget(self.dosen_gender_view)  # Donut Chart Gender Dosen
+        self.charts_layout.addWidget(self.doswal_chart_view)  # Bar Chart Top Doswal
+
+        # 3. Kelompok Prodi
+        self.charts_layout.addWidget(self.gpa_chart_view)     # Bar Chart IPK Prodi
+
+        content_layout.addLayout(self.charts_layout)
         
-        # --- Scroll Area Setup ---
+        # Scroll Area Setup
         from PySide6.QtWidgets import QScrollArea
         self.scroll_area = QScrollArea() 
         self.scroll_area.setWidgetResizable(True)
@@ -3140,6 +3278,52 @@ class MainWidget(QWidget):
         self.scroll_area.setFrameShape(QFrame.NoFrame)
         
         return self.scroll_area
+
+    # --- LOGIKA FILTER DASHBOARD (UPDATE) ---
+    def filter_dashboard(self, category):
+        # Grouping Grafik
+        charts_mhs = [self.chart_view, self.gender_chart_view, self.status_chart_view, self.dist_chart_view]
+        
+        # Update charts_dosen dengan 2 grafik baru
+        charts_dosen = [self.jabatan_chart_view, self.dosen_gender_view, self.doswal_chart_view]
+        
+        charts_prodi = [self.gpa_chart_view]
+        
+        def set_visible(widgets, visible):
+            for w in widgets: w.setVisible(visible)
+
+        if category == "ALL":
+            self.welcome_label.setText(f"Selamat Datang, {self.current_username}!")
+            self.btn_reset_filter.hide()
+            set_visible(charts_mhs, True); set_visible(charts_dosen, True); set_visible(charts_prodi, True)
+        else:
+            self.btn_reset_filter.show()
+            if category == "MAHASISWA":
+                self.welcome_label.setText("Analisis Data: MAHASISWA")
+                set_visible(charts_mhs, True); set_visible(charts_dosen, False); set_visible(charts_prodi, False)
+            elif category == "DOSEN":
+                self.welcome_label.setText("Analisis Data: DOSEN")
+                set_visible(charts_mhs, False); set_visible(charts_dosen, True); set_visible(charts_prodi, False)
+            elif category == "PRODI":
+                self.welcome_label.setText("Analisis Data: PROGRAM STUDI")
+                set_visible(charts_mhs, False); set_visible(charts_dosen, False); set_visible(charts_prodi, True)
+
+    # --- (Pastikan method ini ada untuk grafik Dosen) ---
+    def create_jabatan_dosen_chart(self):
+        series = QPieSeries()
+        series.setHoleSize(0.35)
+        chart = QChart()
+        chart.addSeries(series)
+        chart.setTitle("Distribusi Jabatan Akademik Dosen")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(Qt.AlignRight)
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setMinimumHeight(400)
+        # Simpan referensi series agar bisa diupdate datanya
+        self.jabatan_series = series 
+        return chart_view
 
     def handle_logout(self):
         msg_box = QMessageBox()
