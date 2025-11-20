@@ -3007,96 +3007,132 @@ class MainWidget(QWidget):
 
     def create_home_page(self):
         content_widget = QWidget()
-        content_widget.setStyleSheet("QWidget { background-color: #FFFFFF; } QLabel { background-color: transparent; color: #000000; }")
+        # Ubah background menjadi putih bersih
+        content_widget.setStyleSheet("QWidget { background-color: #FFFFFF; }")
+        
         content_layout = QVBoxLayout(content_widget)
         content_layout.setSpacing(20)
         content_layout.setAlignment(Qt.AlignTop)
-        content_layout.setContentsMargins(30, 30, 30, 30)
+        content_layout.setContentsMargins(40, 40, 40, 40)
 
-        # --- BAGIAN BARU: TOMBOL EXPORT DI UJUNG KIRI ---
-        top_bar_layout = QHBoxLayout()
+        # --- 1. HEADER (Hanya Selamat Datang) ---
+        self.welcome_label = QLabel(f"Selamat Datang, {self.current_username}!")
+        self.welcome_label.setAlignment(Qt.AlignCenter)
+        # Margin bottom diatur 30px agar ada jarak yang pas ke kartu di bawahnya
+        self.welcome_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #000000; margin-bottom: 30px;")
         
+        content_layout.addWidget(self.welcome_label)
+        # (Label Role/Login Sebagai telah dihapus di sini)
+
+        # --- 2. AREA KARTU STATISTIK & TOMBOL EXPORT ---
+        stats_container = QHBoxLayout()
+        stats_container.setSpacing(20)
+        stats_container.setContentsMargins(0, 0, 0, 20)
+
+        # Fungsi Helper untuk Membuat Kartu
+        def create_card(icon_emoji, object_name):
+            card = QFrame()
+            card.setStyleSheet("""
+                QFrame {
+                    background-color: #FFFFFF;
+                    border: 1px solid #E0E0E0;
+                    border-radius: 15px;
+                }
+                QFrame:hover {
+                    border: 1px solid #70AD47; /* Efek hover hijau */
+                }
+            """)
+            card.setFixedSize(250, 120) # Ukuran kartu fix
+
+            layout = QVBoxLayout(card)
+            layout.setAlignment(Qt.AlignCenter)
+            layout.setSpacing(5)
+
+            # Ikon (Menggunakan Emoji Font Besar)
+            lbl_icon = QLabel(icon_emoji)
+            lbl_icon.setAlignment(Qt.AlignCenter)
+            lbl_icon.setStyleSheet("font-size: 40px; color: #70AD47; border: none;") # Warna Hijau
+            
+            # Label Statistik (Akan diisi angka nanti)
+            lbl_value = QLabel("Loading...")
+            lbl_value.setObjectName(object_name)
+            lbl_value.setAlignment(Qt.AlignCenter)
+            lbl_value.setStyleSheet("font-size: 14px; font-weight: bold; color: #333333; border: none;")
+            
+            layout.addWidget(lbl_icon)
+            layout.addWidget(lbl_value)
+            
+            return card, lbl_value
+
+        # -- Kartu 1: Mahasiswa --
+        card_mhs, self.label_stats_mhs = create_card("🎓", "stats_mhs")
+        stats_container.addWidget(card_mhs)
+
+        # -- Kartu 2: Dosen --
+        card_dosen, self.label_stats_dosen = create_card("💼", "stats_dosen")
+        stats_container.addWidget(card_dosen)
+
+        # -- Kartu 3: Prodi --
+        card_prodi, self.label_stats_prodi = create_card("🏛️", "stats_prodi")
+        stats_container.addWidget(card_prodi)
+
+        # Spacer (Pemisah agar tombol Export terdorong ke kanan)
+        stats_container.addStretch()
+
+        # -- Tombol Export PDF --
         self.btn_export_pdf = QPushButton("Export PDF")
         self.btn_export_pdf.setCursor(Qt.PointingHandCursor)
-        self.btn_export_pdf.setFixedWidth(150) # Atur lebar agar rapi
+        self.btn_export_pdf.setFixedSize(150, 50)
         self.btn_export_pdf.setStyleSheet("""
             QPushButton {
-                background-color: #E74C3C; 
+                background-color: #70AD47; /* Warna Hijau */
                 color: white; 
+                font-size: 14px;
                 font-weight: bold;
-                padding: 8px 15px; 
-                border-radius: 5px; 
+                border-radius: 8px; 
                 border: none;
             }
-            QPushButton:hover { background-color: #C0392B; }
+            QPushButton:hover { background-color: #5D9138; }
+            QPushButton:pressed { background-color: #4A752C; }
         """)
-        # Hubungkan ke fungsi export (pastikan fungsi export_dashboard_to_pdf sudah ada di class)
-        self.btn_export_pdf.clicked.connect(self.export_dashboard_to_pdf) 
-
-        top_bar_layout.addWidget(self.btn_export_pdf) # Simpan di kiri
-        top_bar_layout.addStretch() # Dorong sisa ruang ke kanan (agar tombol tetap di kiri)
+        self.btn_export_pdf.clicked.connect(self.export_dashboard_to_pdf)
         
-        content_layout.addLayout(top_bar_layout)
-        # ------------------------------------------------
+        stats_container.addWidget(self.btn_export_pdf)
 
-        # --- Header & Stats Teks ---
-        self.welcome_label = QLabel("Selamat Datang!")
-        self.welcome_label.setAlignment(Qt.AlignCenter)
-        self.welcome_label.setStyleSheet("font-size: 24px; font-weight: 600; padding-bottom: 20px;")
-        content_layout.addWidget(self.welcome_label)
+        content_layout.addLayout(stats_container)
 
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(30)
-        stats_layout.setAlignment(Qt.AlignCenter)
-        
-        stats_style = "font-size: 16px; font-weight: bold; color: #0078D7;"
-        self.label_stats_mhs = QLabel("Total Mahasiswa: 0"); self.label_stats_mhs.setStyleSheet(stats_style)
-        self.label_stats_dosen = QLabel("Total Dosen: 0"); self.label_stats_dosen.setStyleSheet(stats_style)
-        self.label_stats_prodi = QLabel("Total Program Studi: 0"); self.label_stats_prodi.setStyleSheet(stats_style)
-        
-        stats_layout.addWidget(self.label_stats_mhs)
-        stats_layout.addWidget(self.label_stats_dosen)
-        stats_layout.addWidget(self.label_stats_prodi)
-        content_layout.addLayout(stats_layout)
-
-        # --- AREA GRAFIK ---
+        # --- 3. AREA GRAFIK ---
         charts_layout = QVBoxLayout()
         charts_layout.setSpacing(40)
 
-        # 1. Tren Mahasiswa (Full Width)
         self.chart_view = self.create_trend_chart()
         self.chart_view.setMinimumHeight(400)
         charts_layout.addWidget(self.chart_view)
         
-        # 2. Komposisi Gender (Full Width)
         self.gender_chart_view = self.create_gender_chart()
         self.gender_chart_view.setMinimumHeight(400)
         charts_layout.addWidget(self.gender_chart_view)
 
-        # 3 & 4. Rata-rata IPK & Status (Berdampingan)
         row_34 = QHBoxLayout()
         row_34.setSpacing(20)
         
-        # 3. Avg IPK (Kiri)
         self.gpa_chart_view = self.create_gpa_chart()
         self.gpa_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         row_34.addWidget(self.gpa_chart_view)
 
-        # 4. Status (Kanan)
         self.status_chart_view = self.create_status_chart()
         self.status_chart_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         row_34.addWidget(self.status_chart_view)
 
         charts_layout.addLayout(row_34)
 
-        # 5. Sebaran Range IPK (Full Width)
         self.dist_chart_view = self.create_gpa_dist_chart()
         self.dist_chart_view.setMinimumHeight(400)
         charts_layout.addWidget(self.dist_chart_view)
 
         content_layout.addLayout(charts_layout)
         
-        # --- Scroll Area ---
+        # --- Scroll Area Setup ---
         from PySide6.QtWidgets import QScrollArea
         self.scroll_area = QScrollArea() 
         self.scroll_area.setWidgetResizable(True)
