@@ -2643,18 +2643,25 @@ class MainWidget(QWidget):
         self.trend_series = QLineSeries()
         self.trend_series.setName("Mahasiswa Aktif")
         self.trend_series.setPointsVisible(True)
-        self.trend_series.setMarkerSize(6.0)
+        self.trend_series.setMarkerSize(4.0) # Ukuran titik sedikit diperbesar
         self.trend_series.setColor(theme_color)
 
-        # Seri Bayangan untuk Label Teks (agar teks naik sedikit)
+        # Seri Bayangan untuk Label Teks
         self.label_series = QScatterSeries()
         self.label_series.setMarkerSize(1.0)
         self.label_series.setColor(Qt.transparent)
         self.label_series.setPointLabelsVisible(True)
-        self.label_series.setPointLabelsFormat("@yPoint\n\n\n\n\n\n\n\n\n\n\n\n\n")
+        
+        format_label = "@yPoint" + ("\n" * 10) + " "
+        self.label_series.setPointLabelsFormat(format_label)
+        # --------------------------
+
         self.label_series.setPointLabelsColor(theme_color)
-        self.label_series.setPointLabelsClipping(False)
-        label_font = QFont("Arial", 10); label_font.setBold(True)
+        
+        # PENTING: Matikan clipping agar teks tidak terpotong jika melewati garis atas grafik
+        self.label_series.setPointLabelsClipping(False) 
+        
+        label_font = QFont("Arial", 11); label_font.setBold(True)
         self.label_series.setPointLabelsFont(label_font)
 
         chart = QChart()
@@ -2663,6 +2670,8 @@ class MainWidget(QWidget):
         chart.setTitle("Tren Jumlah Mahasiswa Aktif per Tahun Masuk")
         chart.setAnimationOptions(QChart.SeriesAnimations)
         chart.setMargins(QMargins(20, 10, 20, 10))
+        
+        # Sembunyikan marker label dari legenda
         chart.legend().markers(self.label_series)[0].setVisible(False)
 
         self.trend_axis_x = QValueAxis()
