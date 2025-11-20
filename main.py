@@ -1560,7 +1560,6 @@ class MainWidget(QWidget):
 
             theme = ThemeColors(self.is_dark).CHART_THEME
             
-            # 1. TREND CHART
             series = QLineSeries()
             series.setName("Mahasiswa Aktif")
             series.setPointsVisible(True)
@@ -1606,12 +1605,17 @@ class MainWidget(QWidget):
             ch.setTheme(theme)
             ch.setBackgroundBrush(Qt.NoBrush)
             ch.legend().markers(label_series)[0].setVisible(False)
+            
+            if self.is_dark:
+                ch.setTitleBrush(QColor("#F1F5F9"))
+                ch.legend().setLabelColor(QColor("#F1F5F9"))
 
             axis_x = QValueAxis()
             axis_x.setLabelFormat("%.0f") 
             axis_x.setRange(min_y, max_y)
             tick_count = int(max_y - min_y) + 1
             axis_x.setTickCount(tick_count if tick_count > 1 else 2)
+            if self.is_dark: axis_x.setLabelsColor(QColor("#F1F5F9"))
             ch.addAxis(axis_x, Qt.AlignBottom)
             series.attachAxis(axis_x)
             label_series.attachAxis(axis_x)
@@ -1619,6 +1623,7 @@ class MainWidget(QWidget):
             axis_y = QValueAxis()
             axis_y.setRange(0, max_c + 5) 
             axis_y.setLabelFormat("%.0f")
+            if self.is_dark: axis_y.setLabelsColor(QColor("#F1F5F9"))
             ch.addAxis(axis_y, Qt.AlignLeft)
             series.attachAxis(axis_y)
             label_series.attachAxis(axis_y)
@@ -1630,7 +1635,6 @@ class MainWidget(QWidget):
                 self.chart_trend.layout().itemAt(0).widget().setParent(None)
             self.chart_trend.layout().addWidget(cv)
 
-            # 2. GENDER CHART
             gen_prodi_data = db.query(Mahasiswa.program_studi, Mahasiswa.gender, func.count(Mahasiswa.id))\
                                .group_by(Mahasiswa.program_studi, Mahasiswa.gender).all()
             
@@ -1664,8 +1668,13 @@ class MainWidget(QWidget):
             ch_g.setTheme(theme)
             ch_g.setBackgroundBrush(Qt.NoBrush)
             
+            if self.is_dark:
+                ch_g.setTitleBrush(QColor("#F1F5F9"))
+                ch_g.legend().setLabelColor(QColor("#F1F5F9"))
+            
             axis_x_g = QBarCategoryAxis()
             axis_x_g.append(sorted_cats)
+            if self.is_dark: axis_x_g.setLabelsColor(QColor("#F1F5F9"))
             ch_g.addAxis(axis_x_g, Qt.AlignBottom)
             series_g.attachAxis(axis_x_g)
 
@@ -1676,6 +1685,7 @@ class MainWidget(QWidget):
                 val = data_map[cat]['L'] + data_map[cat]['P']
                 if val > max_val: max_val = val
             axis_y_g.setRange(0, max_val + 2)
+            if self.is_dark: axis_y_g.setLabelsColor(QColor("#F1F5F9"))
             
             ch_g.addAxis(axis_y_g, Qt.AlignLeft)
             series_g.attachAxis(axis_y_g)
@@ -1687,37 +1697,49 @@ class MainWidget(QWidget):
                 self.chart_gender.layout().itemAt(0).widget().setParent(None)
             self.chart_gender.layout().addWidget(cv_g)
 
-            # 3. STATUS CHART
-            series_s = QBarSeries()
-            series_s.setLabelsVisible(True)
-            series_s.setLabelsFormat("@value")
-            set_s = QBarSet("Status")
-            stat_data = db.query(Mahasiswa.status, func.count(Mahasiswa.id)).group_by(Mahasiswa.status).all()
-            cats = []
-            for s, c in stat_data: set_s.append(c); cats.append(s)
-            series_s.append(set_s)
+            series_s = QPieSeries()
+            series_s.setHoleSize(0.40)
             
+            stat_data = db.query(Mahasiswa.status, func.count(Mahasiswa.id)).group_by(Mahasiswa.status).all()
+            col_map = {"Aktif": "#10B981", "Cuti": "#F59E0B", "Lulus": "#3B82F6", "DO": "#EF4444", "Keluar": "#EF4444"}
+            
+            tot_stat = sum([c for _, c in stat_data])
+            
+            for st, cnt in stat_data:
+                pct = (cnt/tot_stat)*100 if tot_stat else 0
+                sl = series_s.append(f"{st}: {cnt} ({pct:.1f}%)", cnt)
+                if st in col_map: 
+                    sl.setColor(QColor(col_map[st]))
+                else:
+                    sl.setColor(QColor("#94A3B8"))
+                
+                if st == "Aktif": 
+                    sl.setExploded(True)
+                    sl.setExplodeDistanceFactor(0.05)
+                
+                sl.setLabelVisible(True)
+                if self.is_dark:
+                    sl.setLabelColor(QColor("#F1F5F9"))
+
             ch_s = QChart()
             ch_s.addSeries(series_s)
-            ch_s.setTitle("Status Mahasiswa")
-            
-            axis_x_s = QBarCategoryAxis()
-            axis_x_s.append(cats)
-            ch_s.addAxis(axis_x_s, Qt.AlignBottom)
-            series_s.attachAxis(axis_x_s)
-            
-            axis_y_s = QValueAxis()
-            ch_s.addAxis(axis_y_s, Qt.AlignLeft)
-            series_s.attachAxis(axis_y_s)
+            ch_s.setTitle("Distribusi Status Mahasiswa")
+            ch_s.legend().setVisible(True)
+            ch_s.legend().setAlignment(Qt.AlignRight)
             
             ch_s.setTheme(theme)
             ch_s.setBackgroundBrush(Qt.NoBrush)
-            cv_s = QChartView(ch_s); cv_s.setRenderHint(QPainter.Antialiasing)
+            
+            if self.is_dark:
+                ch_s.setTitleBrush(QColor("#F1F5F9"))
+                ch_s.legend().setLabelColor(QColor("#F1F5F9"))
+            
+            cv_s = QChartView(ch_s)
+            cv_s.setRenderHint(QPainter.Antialiasing)
             
             if self.chart_status.layout().count(): self.chart_status.layout().itemAt(0).widget().setParent(None)
             self.chart_status.layout().addWidget(cv_s)
 
-            # 4. IPK CHART
             series_d = QBarSeries()
             series_d.setLabelsVisible(True)
             series_d.setLabelsFormat("@value")
@@ -1742,15 +1764,22 @@ class MainWidget(QWidget):
             
             ax_d = QBarCategoryAxis()
             ax_d.append(["<2.00", "2.00-2.75", "2.76-3.50", ">3.50"])
+            if self.is_dark: ax_d.setLabelsColor(QColor("#F1F5F9"))
             ch_d.addAxis(ax_d, Qt.AlignBottom)
             series_d.attachAxis(ax_d)
             
             ay_d = QValueAxis()
+            if self.is_dark: ay_d.setLabelsColor(QColor("#F1F5F9"))
             ch_d.addAxis(ay_d, Qt.AlignLeft)
             series_d.attachAxis(ay_d)
 
             ch_d.setTheme(theme)
             ch_d.setBackgroundBrush(Qt.NoBrush)
+            
+            if self.is_dark:
+                ch_d.setTitleBrush(QColor("#F1F5F9"))
+                ch_d.legend().setLabelColor(QColor("#F1F5F9"))
+                
             cv_d = QChartView(ch_d); cv_d.setRenderHint(QPainter.Antialiasing)
             
             if self.chart_dist.layout().count(): self.chart_dist.layout().itemAt(0).widget().setParent(None)
