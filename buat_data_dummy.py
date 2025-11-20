@@ -6,13 +6,12 @@ from collections import defaultdict
 print("Memulai proses pembuatan data dummy...")
 
 # Inisialisasi Faker
-fake = Faker('id_ID')  # Menggunakan data Indonesia
+fake = Faker('id_ID')
 
 # ====================================================================
-# DEFINISI ATURAN
+# DEFINISI ATURAN & GELAR
 # ====================================================================
 
-# 1. Definisi Program Studi + Kode
 PRODI_KODE = {
     "Sistem Informasi": "01",
     "Informatika": "02",
@@ -20,11 +19,25 @@ PRODI_KODE = {
     "DKV": "04"
 }
 
-# 2. Definisi Dosen
 JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
 
+# LIST GELAR YANG DIMINTA
+# Saya pasangkan dengan gelar S2 agar terlihat seperti dosen sungguhan
+GELAR_MAPPING = {
+    "S.Kom": "M.Kom",
+    "S.E": "M.M",
+    "S.Ds": "M.Ds",
+    "S.T": "M.T"
+}
+
+def get_gelar_dosen():
+    """Mengambil acak gelar S1 dan memasangkannya dengan S2"""
+    s1 = random.choice(list(GELAR_MAPPING.keys()))
+    s2 = GELAR_MAPPING[s1]
+    return f"{s1}, {s2}"
+
 # ====================================================================
-# FUNGSI 1: GENERATOR MAHASISWA
+# FUNGSI 1: GENERATOR MAHASISWA (Tidak Berubah)
 # ====================================================================
 def generate_students(num_students=200):
     print(f"Membuat {num_students} data mahasiswa...")
@@ -33,30 +46,23 @@ def generate_students(num_students=200):
 
     for _ in range(num_students):
         gender = random.choice(['L', 'P'])
-        
-        # Nama Mahasiswa (Tanpa Gelar)
         if gender == 'L':
             nama = f"{fake.first_name_male()} {fake.last_name_male()}"
         else:
             nama = f"{fake.first_name_female()} {fake.last_name_female()}"
 
-        # Status Mahasiswa (Tetap ada karena penting untuk Akademik)
         status = random.choices(["Aktif", "Cuti", "Lulus"], weights=[8, 1, 1], k=1)[0]
-        
         tahun_masuk = random.choice([2021, 2022, 2023, 2024, 2025])
+        # Logika tanggal lahir sederhana
         tahun_lahir = tahun_masuk - random.randint(18, 20)
-        tanggal_lahir = fake.date_of_birth(minimum_age=0, maximum_age=0).replace(year=tahun_lahir)
+        tanggal_lahir = fake.date_of_birth(minimum_age=18, maximum_age=22).replace(year=tahun_lahir)
 
-        # Pilih prodi dan ambil kodenya
         prodi_nama = random.choice(list(PRODI_KODE.keys()))
         kode_prodi = PRODI_KODE[prodi_nama]
 
-        # Counter berdasarkan (tahun_masuk, kode_prodi)
         key = f"{tahun_masuk}_{kode_prodi}"
         nim_counters[key] += 1
         urut = f"{nim_counters[key]:03d}"
-
-        # Format NIM: 2 digit tahun + 2 digit kode prodi + 3 digit urut
         nim = f"{tahun_masuk % 100:02d}{kode_prodi}{urut}"
 
         data.append({
@@ -74,7 +80,7 @@ def generate_students(num_students=200):
     print("-> SUKSES! File 'data_mahasiswa_baru.xlsx' telah dibuat.")
 
 # ====================================================================
-# FUNGSI 2: GENERATOR DOSEN (TANPA STATUS)
+# FUNGSI 2: GENERATOR DOSEN (DENGAN GELAR BARU)
 # ====================================================================
 def generate_lecturers(num_lecturers=30):
     print(f"Membuat {num_lecturers} data dosen...")
@@ -83,26 +89,25 @@ def generate_lecturers(num_lecturers=30):
     for i in range(num_lecturers):
         gender = random.choice(['L', 'P'])
         
-        # Dosen tetap menggunakan gelar
         if gender == 'L':
             prefix = fake.prefix_male()
             first = fake.first_name_male()
             last = fake.last_name_male()
-            suffix = fake.suffix_male()
-            nama_lengkap = f"{prefix} {first} {last}, {suffix}"
         else:
             prefix = fake.prefix_female()
             first = fake.first_name_female()
             last = fake.last_name_female()
-            suffix = fake.suffix_female()
-            nama_lengkap = f"{prefix} {first} {last}, {suffix}"
 
-        # --- PERUBAHAN: STATUS DIHAPUS DARI SINI ---
+        # --- BAGIAN YANG DIUBAH ---
+        # Menggunakan gelar random dari list yang diminta
+        gelar_belakang = get_gelar_dosen()
         
+        nama_lengkap = f"{prefix} {first} {last}, {gelar_belakang}"
+        # --------------------------
+
         jabatan = random.choice(JABATAN_LIST)
         nidn = fake.unique.random_number(digits=10)
         
-        # Pembersihan nama untuk email
         clean_name = first.lower().replace(',', '').replace('.', '') + str(i)
         
         data.append({
@@ -115,7 +120,7 @@ def generate_lecturers(num_lecturers=30):
 
     df = pd.DataFrame(data)
     df.to_excel("data_dosen_baru.xlsx", index=False)
-    print("-> SUKSES! File 'data_dosen_baru.xlsx' (Tanpa Status) telah dibuat.")
+    print("-> SUKSES! File 'data_dosen_baru.xlsx' (Dengan Gelar S.Kom/S.E/dll) telah dibuat.")
 
 # ====================================================================
 # JALANKAN FUNGSI
@@ -123,4 +128,4 @@ def generate_lecturers(num_lecturers=30):
 if __name__ == "__main__":
     generate_students(100)
     generate_lecturers(30)
-    print("\nSelesai! Silakan gunakan file excel baru untuk Import.")
+    print("\nSelesai!")

@@ -1,6 +1,7 @@
 import sys
 import bcrypt
-import pandas as pd 
+import pandas as pd
+import random 
 from collections import defaultdict
 from datetime import datetime
 import platform
@@ -337,28 +338,76 @@ class MahasiswaWidget(QWidget):
         tl = QVBoxLayout(self.table_card); tl.setContentsMargins(20,20,20,20)
         
         th = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText("🔍 Cari Mahasiswa..."); self.search.textChanged.connect(self.filter)
+        self.search = QLineEdit(); self.search.setPlaceholderText("🔍 Cari Mahasiswa...")
+        self.search.textChanged.connect(self.filter)
+        
+        self.f_prodi = QComboBox()
+        self.f_prodi.addItem("Semua Prodi")
+        self.f_prodi.currentTextChanged.connect(self.filter)
+        
+        self.f_tahun = QComboBox()
+        self.f_tahun.addItem("Semua Tahun")
+        self.f_tahun.currentTextChanged.connect(self.filter)
+
         b_imp = QPushButton("Import Excel"); b_imp.setObjectName("btn_export"); b_imp.clicked.connect(self.import_xls)
         b_exp = QPushButton("Export Excel"); b_exp.setObjectName("btn_export"); b_exp.clicked.connect(self.export_xls)
-        th.addWidget(self.search, 1); th.addWidget(b_imp); th.addWidget(b_exp)
+        
+        th.addWidget(self.search, 2)
+        th.addWidget(self.f_prodi, 1)
+        th.addWidget(self.f_tahun, 1)
+        th.addWidget(b_imp)
+        th.addWidget(b_exp)
         tl.addLayout(th)
         
         self.table = QTableWidget(); self.table.setColumnCount(9)
         self.table.setHorizontalHeaderLabels(["ID", "NIM", "Nama", "Prodi", "L/P", "Thn", "Tgl Lahir", "Status", "Doswal"])
         self.table.setColumnHidden(0, True); self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows); self.table.verticalHeader().setVisible(False)
+        
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.ExtendedSelection) 
+        
+        self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True); self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.itemClicked.connect(self.row_click)
         tl.addWidget(self.table)
         
+        batch_layout = QHBoxLayout()
+        self.cb_batch_doswal = QComboBox()
+        self.cb_batch_doswal.setEditable(True)
+        self.cb_batch_doswal.setInsertPolicy(QComboBox.NoInsert)
+        self.cb_batch_doswal.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.cb_batch_doswal.completer().setFilterMode(Qt.MatchContains)
+        
+        btn_batch = QPushButton("Set Doswal (Batch)")
+        btn_batch.setObjectName("btn_simpan")
+        btn_batch.clicked.connect(self.batch_update)
+        
+        batch_layout.addWidget(QLabel("Batch Update Doswal (Pilih Baris):"))
+        batch_layout.addWidget(self.cb_batch_doswal, 1)
+        batch_layout.addWidget(btn_batch)
+        
+        tl.addLayout(batch_layout)
+        
         layout.addWidget(self.form_card); layout.addWidget(self.table_card)
         self.load_doswal()
+
+    def showEvent(self, event):
+        self.load_doswal()
+        self.load_data()
+        super().showEvent(event)
 
     def load_doswal(self):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
+        
         self.i_doswal.clear(); self.i_doswal.addItem("-", None)
-        for d in db.query(Dosen).all(): self.i_doswal.addItem(d.nama, d.id)
+        self.cb_batch_doswal.clear(); self.cb_batch_doswal.addItem("- Pilih Doswal untuk Batch -", None)
+        
+        dosen_list = db.query(Dosen).all()
+        for d in dosen_list:
+            self.i_doswal.addItem(d.nama, d.id)
+            self.cb_batch_doswal.addItem(d.nama, d.id)
+            
         db.close()
 
     def load_data(self):
@@ -366,6 +415,10 @@ class MahasiswaWidget(QWidget):
         db = SessionLocal()
         try:
             self.table.setRowCount(0)
+            
+            list_prodi = set()
+            list_tahun = set()
+
             for i, m in enumerate(db.query(Mahasiswa).all()):
                 self.table.insertRow(i)
                 self.table.setItem(i,0,QTableWidgetItem(str(m.id)))
@@ -377,6 +430,27 @@ class MahasiswaWidget(QWidget):
                 self.table.setItem(i,6,QTableWidgetItem(m.tanggal_lahir.strftime("%d/%m/%Y") if m.tanggal_lahir else "-"))
                 self.table.setItem(i,7,QTableWidgetItem(m.status))
                 self.table.setItem(i,8,QTableWidgetItem(m.dosen_wali.nama if m.dosen_wali else "-"))
+                
+                if m.program_studi: list_prodi.add(m.program_studi)
+                if m.tahun_masuk: list_tahun.add(str(m.tahun_masuk))
+            
+            current_prodi = self.f_prodi.currentText()
+            current_tahun = self.f_tahun.currentText()
+
+            self.f_prodi.blockSignals(True)
+            self.f_prodi.clear()
+            self.f_prodi.addItem("Semua Prodi")
+            self.f_prodi.addItems(sorted(list(list_prodi)))
+            self.f_prodi.setCurrentText(current_prodi)
+            self.f_prodi.blockSignals(False)
+
+            self.f_tahun.blockSignals(True)
+            self.f_tahun.clear()
+            self.f_tahun.addItem("Semua Tahun")
+            self.f_tahun.addItems(sorted(list(list_tahun)))
+            self.f_tahun.setCurrentText(current_tahun)
+            self.f_tahun.blockSignals(False)
+
         finally: db.close()
 
     def row_click(self, item):
@@ -456,6 +530,46 @@ class MahasiswaWidget(QWidget):
         finally: 
             db.close()
 
+    def batch_update(self):
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Peringatan", "Pilih minimal satu mahasiswa dari tabel!")
+            return
+            
+        doswal_id = self.cb_batch_doswal.currentData()
+        
+        if self.cb_batch_doswal.currentIndex() < 0:
+            found = self.cb_batch_doswal.findText(self.cb_batch_doswal.currentText())
+            if found >= 0: doswal_id = self.cb_batch_doswal.itemData(found)
+            
+        if not doswal_id:
+            QMessageBox.warning(self, "Peringatan", "Pilih Dosen Wali untuk Batch Update!")
+            return
+
+        if QMessageBox.question(self, "Konfirmasi", f"Update Dosen Wali untuk {len(selected_rows)} mahasiswa terpilih?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.No:
+            return
+
+        db = SessionLocal()
+        try:
+            updated_count = 0
+            for row in selected_rows:
+                mhs_id = int(self.table.item(row.row(), 0).text())
+                mhs = db.query(Mahasiswa).get(mhs_id)
+                if mhs:
+                    mhs.dosen_wali_id = doswal_id
+                    updated_count += 1
+            
+            if updated_count > 0:
+                log_activity(self.username, "BATCH UPDATE", "Mahasiswa", f"Update Doswal untuk {updated_count} Mhs")
+                db.commit()
+                self.load_data()
+                QMessageBox.information(self, "Sukses", f"Berhasil mengupdate {updated_count} mahasiswa.")
+        except Exception as e:
+            db.rollback()
+            QMessageBox.critical(self, "Error", str(e))
+        finally:
+            db.close()
+
     def delete(self):
         if self.sel_id and QMessageBox.question(self, "Hapus", "Yakin?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             db = SessionLocal()
@@ -474,9 +588,20 @@ class MahasiswaWidget(QWidget):
 
     def filter(self):
         t = self.search.text().lower()
+        fp = self.f_prodi.currentText()
+        ft = self.f_tahun.currentText()
+
         for r in range(self.table.rowCount()):
-            match = t in self.table.item(r,1).text().lower() or t in self.table.item(r,2).text().lower()
-            self.table.setRowHidden(r, not match)
+            nim = self.table.item(r,1).text().lower()
+            nama = self.table.item(r,2).text().lower()
+            prodi = self.table.item(r,3).text()
+            tahun = self.table.item(r,5).text()
+            
+            match_text = t in nim or t in nama
+            match_prodi = (fp == "Semua Prodi" or fp == prodi)
+            match_tahun = (ft == "Semua Tahun" or ft == tahun)
+            
+            self.table.setRowHidden(r, not (match_text and match_prodi and match_tahun))
 
     def import_xls(self):
         path, _ = QFileDialog.getOpenFileName(self, "File Excel", "", "*.xlsx")
@@ -819,6 +944,7 @@ class MatakuliahWidget(QWidget):
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
 class NilaiWidget(QWidget):
+    data_changed = Signal()
     NILAI_BOBOT = {"A": 4.0, "B": 3.0, "C": 2.0, "D": 1.0, "E": 0.0}
 
     def __init__(self, username):
@@ -858,7 +984,10 @@ class NilaiWidget(QWidget):
         b_add = QPushButton("Simpan Nilai"); b_add.setObjectName("btn_simpan"); b_add.clicked.connect(self.simpan_nilai)
         b_del = QPushButton("Hapus"); b_del.setObjectName("btn_hapus"); b_del.clicked.connect(self.hapus_nilai)
         
-        ml.addWidget(self.cb_smt); ml.addWidget(self.cb_mk, 2); ml.addWidget(self.cb_nil); ml.addWidget(b_add); ml.addWidget(b_del)
+        b_dummy = QPushButton("Generate Full Dummy"); b_dummy.setObjectName("btn_export"); b_dummy.clicked.connect(self.generate_dummy)
+        
+        ml.addWidget(self.cb_smt); ml.addWidget(self.cb_mk, 2); ml.addWidget(self.cb_nil)
+        ml.addWidget(b_add); ml.addWidget(b_del); ml.addWidget(b_dummy)
         
         bot = QFrame(); bot.setObjectName("table_frame"); add_shadow(bot)
         bl = QVBoxLayout(bot)
@@ -900,6 +1029,53 @@ class NilaiWidget(QWidget):
                 key = (str(mk.semester), mk.program_studi)
                 disp = f"{mk.kode_mk} - {mk.nama_matakuliah}"
                 self.all_matakuliah_map[key].append((disp, {"id": mk.id, "sks": mk.sks}))
+        finally:
+            db.close()
+
+    def generate_dummy(self):
+        db = SessionLocal()
+        try:
+            mhs_list = db.query(Mahasiswa).filter_by(status='Aktif').all()
+            mk_list = db.query(Matakuliah).all()
+            
+            if not mhs_list or not mk_list:
+                QMessageBox.warning(self, "Error", "Data Mahasiswa atau Matakuliah kosong.")
+                return
+
+            existing_grades = set()
+            for n in db.query(Nilai.mahasiswa_id, Nilai.matakuliah_id).all():
+                existing_grades.add((n.mahasiswa_id, n.matakuliah_id))
+
+            added_count = 0
+            
+            for mhs in mhs_list:
+                for mk in mk_list:
+                    if mhs.program_studi == mk.program_studi:
+                        if (mhs.id, mk.id) not in existing_grades:
+                            huruf = random.choice(["A", "B", "C"])
+                            angka = self.NILAI_BOBOT[huruf]
+                            
+                            new_nilai = Nilai(
+                                mahasiswa_id=mhs.id,
+                                matakuliah_id=mk.id,
+                                nilai_huruf=huruf,
+                                nilai_angka=angka,
+                                semester_diambil=mk.semester
+                            )
+                            db.add(new_nilai)
+                            added_count += 1
+            
+            db.commit()
+            if added_count > 0:
+                log_activity(self.username, "CREATE", "Nilai", f"Generate {added_count} Nilai Dummy Massal")
+                self.data_changed.emit()
+                QMessageBox.information(self, "Sukses", f"Berhasil mengisi {added_count} nilai kosong.")
+                if self.cur_mhs_id: self.load_transkrip()
+            else:
+                QMessageBox.information(self, "Info", "Semua mahasiswa sudah memiliki nilai lengkap.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
         finally:
             db.close()
 
@@ -975,11 +1151,15 @@ class NilaiWidget(QWidget):
                     exist.nilai_huruf = hrf
                     exist.nilai_angka = angka
                     log_activity(self.username, "UPDATE", "Nilai", f"Mhs {self.cur_mhs_id} MK {mk_id} -> {hrf}")
-                    db.commit(); QMessageBox.information(self, "Sukses", "Nilai Diupdate")
+                    db.commit()
+                    self.data_changed.emit()
+                    QMessageBox.information(self, "Sukses", "Nilai Diupdate")
             else:
                 db.add(Nilai(mahasiswa_id=self.cur_mhs_id, matakuliah_id=mk_id, nilai_huruf=hrf, nilai_angka=angka, semester_diambil=smt))
                 log_activity(self.username, "CREATE", "Nilai", f"Mhs {self.cur_mhs_id} MK {mk_id} -> {hrf}")
-                db.commit(); QMessageBox.information(self, "Sukses", "Nilai Disimpan")
+                db.commit()
+                self.data_changed.emit()
+                QMessageBox.information(self, "Sukses", "Nilai Disimpan")
             self.load_transkrip()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
@@ -998,7 +1178,9 @@ class NilaiWidget(QWidget):
                 if obj:
                     db.delete(obj)
                     log_activity(self.username, "DELETE", "Nilai", f"ID {nid}")
-                    db.commit(); self.load_transkrip()
+                    db.commit()
+                    self.data_changed.emit()
+                    self.load_transkrip()
             finally:
                 db.close()
 
@@ -1072,7 +1254,6 @@ class NilaiWidget(QWidget):
             QMessageBox.information(self, "Sukses", "Transkrip Disimpan")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
-            
 
 class PenggunaWidget(QWidget):
     ROLE_LIST = ["Admin Akademik", "Kepala Jurusan", "Rektor", "Admin Manajemen"]
@@ -1370,23 +1551,32 @@ class MainWidget(QWidget):
     def __init__(self, username, role, is_dark):
         super().__init__()
         self.username = username
-        self.pengguna_page = PenggunaWidget(username)
         self.role = role
         self.is_dark = is_dark
         
         layout = QHBoxLayout(self); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0)
-        self.nav = self.create_nav()
-        layout.addWidget(self.nav)
         
+        # Inisialisasi Stack
         self.stack = QStackedWidget()
         self.dashboard = self.create_dashboard()
-        self.stack.addWidget(self.dashboard)
-        self.stack.addWidget(MahasiswaWidget(username))
-        self.stack.addWidget(DosenWidget(username))
-        self.stack.addWidget(MatakuliahWidget(username))
-        self.stack.addWidget(NilaiWidget(username))
-        self.stack.addWidget(AuditLogWidget())
-        self.stack.addWidget(self.pengguna_page)
+        
+        # Inisialisasi Page
+        self.nilai_page = NilaiWidget(username) # Assign ke variabel agar bisa diakses
+        
+        # Urutan Add Widget
+        self.stack.addWidget(self.dashboard)                   # 0
+        self.stack.addWidget(MahasiswaWidget(username))        # 1
+        self.stack.addWidget(DosenWidget(username))            # 2
+        self.stack.addWidget(MatakuliahWidget(username))       # 3
+        self.stack.addWidget(self.nilai_page)                  # 4
+        self.stack.addWidget(AuditLogWidget())                 # 5
+        self.stack.addWidget(PenggunaWidget(username))         # 6
+        
+        # Koneksi Signal Otomatis
+        self.nilai_page.data_changed.connect(self.update_dashboard_stats)
+
+        self.nav = self.create_nav()
+        layout.addWidget(self.nav)
         layout.addWidget(self.stack)
 
         self.update_dashboard_stats() 
@@ -1408,8 +1598,10 @@ class MainWidget(QWidget):
         l.addWidget(btn("📚 Matakuliah", 3))
         l.addWidget(btn("📝 Penilaian", 4))
         l.addWidget(btn("📜 Log Sistem", 5))
-        if self.role == "Admin Manajemen":
+
+        if self.role == "Admin Manajemen": 
             l.addWidget(btn("👤 Pengguna", 6))
+
         l.addStretch()
         
         bout = QPushButton("🚪 Logout")
@@ -1418,7 +1610,7 @@ class MainWidget(QWidget):
         l.addWidget(bout)
         
         return f
-
+    
     def create_dashboard(self):
         w = QWidget()
         from PySide6.QtWidgets import QScrollArea
@@ -1555,11 +1747,17 @@ class MainWidget(QWidget):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
         try:
-            nm = db.query(Mahasiswa).count(); nd = db.query(Dosen).count(); nmk = db.query(Matakuliah).count()
-            self.lbl_mhs.setText(str(nm)); self.lbl_dsn.setText(str(nd)); self.lbl_mk.setText(str(nmk))
+            # --- STATISTIK KARTU ---
+            nm = db.query(Mahasiswa).count()
+            nd = db.query(Dosen).count()
+            nmk = db.query(Matakuliah).count()
+            self.lbl_mhs.setText(str(nm))
+            self.lbl_dsn.setText(str(nd))
+            self.lbl_mk.setText(str(nmk))
 
             theme = ThemeColors(self.is_dark).CHART_THEME
             
+            # --- 1. CHART TREN MAHASISWA ---
             series = QLineSeries()
             series.setName("Mahasiswa Aktif")
             series.setPointsVisible(True)
@@ -1575,7 +1773,7 @@ class MainWidget(QWidget):
             label_series.setMarkerSize(1.0)
             label_series.setColor(Qt.transparent)
             label_series.setPointLabelsVisible(True)
-            label_series.setPointLabelsFormat("@yPoint\n\n") 
+            label_series.setPointLabelsFormat("@yPoint") 
             label_series.setPointLabelsColor(QColor("#F1F5F9" if self.is_dark else "#333333"))
             label_series.setPointLabelsClipping(False)
             label_font = QFont("Arial", 10)
@@ -1584,19 +1782,21 @@ class MainWidget(QWidget):
 
             trend_data = db.query(Mahasiswa.tahun_masuk, func.count(Mahasiswa.id)).group_by(Mahasiswa.tahun_masuk).order_by(Mahasiswa.tahun_masuk).all()
             
+            min_y, max_y, max_c = 0, 0, 0
             if trend_data:
-                years = [y for y, c in trend_data]
-                counts = [c for y, c in trend_data]
-                min_y, max_y = min(years), max(years)
-                max_c = max(counts)
+                years = [y for y, c in trend_data if y is not None]
+                counts = [c for y, c in trend_data if y is not None]
+                if years:
+                    min_y, max_y = min(years), max(years)
+                    max_c = max(counts)
+                    for y, c in trend_data:
+                        if y is not None:
+                            series.append(y, c)
+                            label_series.append(y, c)
             else:
                 curr_y = datetime.now().year
                 min_y, max_y = curr_y - 1, curr_y
                 max_c = 5
-
-            for y, c in trend_data: 
-                series.append(y, c)
-                label_series.append(y, c)
 
             ch = QChart()
             ch.addSeries(series)
@@ -1630,11 +1830,11 @@ class MainWidget(QWidget):
             
             cv = QChartView(ch)
             cv.setRenderHint(QPainter.Antialiasing)
-            
             if self.chart_trend.layout().count(): 
                 self.chart_trend.layout().itemAt(0).widget().setParent(None)
             self.chart_trend.layout().addWidget(cv)
 
+            # --- 2. CHART GENDER ---
             gen_prodi_data = db.query(Mahasiswa.program_studi, Mahasiswa.gender, func.count(Mahasiswa.id))\
                                .group_by(Mahasiswa.program_studi, Mahasiswa.gender).all()
             
@@ -1645,7 +1845,7 @@ class MainWidget(QWidget):
                     data_map[prodi][gender] = count
                     categories.add(prodi)
             
-            sorted_cats = sorted(list(categories))
+            sorted_cats = sorted(list(categories)) if categories else ["-"]
 
             set_l = QBarSet("Laki-laki")
             set_l.setColor(QColor("#3498DB"))
@@ -1692,11 +1892,11 @@ class MainWidget(QWidget):
 
             cv_g = QChartView(ch_g)
             cv_g.setRenderHint(QPainter.Antialiasing)
-            
             if self.chart_gender.layout().count(): 
                 self.chart_gender.layout().itemAt(0).widget().setParent(None)
             self.chart_gender.layout().addWidget(cv_g)
 
+            # --- 3. CHART STATUS (DONUT) ---
             series_s = QPieSeries()
             series_s.setHoleSize(0.40)
             
@@ -1707,7 +1907,8 @@ class MainWidget(QWidget):
             
             for st, cnt in stat_data:
                 pct = (cnt/tot_stat)*100 if tot_stat else 0
-                sl = series_s.append(f"{st}: {cnt} ({pct:.1f}%)", cnt)
+                label = f"{st}: {cnt}"
+                sl = series_s.append(label, cnt)
                 if st in col_map: 
                     sl.setColor(QColor(col_map[st]))
                 else:
@@ -1726,7 +1927,6 @@ class MainWidget(QWidget):
             ch_s.setTitle("Distribusi Status Mahasiswa")
             ch_s.legend().setVisible(True)
             ch_s.legend().setAlignment(Qt.AlignRight)
-            
             ch_s.setTheme(theme)
             ch_s.setBackgroundBrush(Qt.NoBrush)
             
@@ -1736,39 +1936,53 @@ class MainWidget(QWidget):
             
             cv_s = QChartView(ch_s)
             cv_s.setRenderHint(QPainter.Antialiasing)
-            
             if self.chart_status.layout().count(): self.chart_status.layout().itemAt(0).widget().setParent(None)
             self.chart_status.layout().addWidget(cv_s)
 
+            # --- 4. CHART SEBARAN IPK (FIXED LOGIC) ---
             series_d = QBarSeries()
             series_d.setLabelsVisible(True)
             series_d.setLabelsFormat("@value")
             set_d = QBarSet("Mahasiswa")
+            set_d.setColor(QColor("#9B59B6")) # Warna Ungu
+
+            # Ambil data nilai
             raw_scores = db.query(Nilai.mahasiswa_id, Nilai.nilai_angka, Matakuliah.sks).join(Matakuliah).all()
-            student_scores = defaultdict(lambda: [0, 0])
-            for mid, val, sks in raw_scores: student_scores[mid][0] += val * sks; student_scores[mid][1] += sks
-            buckets = [0,0,0,0] 
-            for d in student_scores.values():
-                if d[1] > 0:
-                    ipk = d[0]/d[1]
-                    if ipk < 2.0: buckets[0]+=1
-                    elif ipk <= 2.75: buckets[1]+=1
-                    elif ipk <= 3.5: buckets[2]+=1
-                    else: buckets[3]+=1
-            for b in buckets: set_d.append(b)
+            
+            student_scores = defaultdict(lambda: [0.0, 0]) # [total_bobot, total_sks]
+            for mid, val, sks in raw_scores:
+                student_scores[mid][0] += (val * sks)
+                student_scores[mid][1] += sks
+            
+            # Kategori: <2.00, 2.00-2.75, 2.76-3.50, >3.50
+            buckets = [0, 0, 0, 0] 
+            for data in student_scores.values():
+                if data[1] > 0:
+                    ipk = data[0] / data[1]
+                    if ipk < 2.00: buckets[0] += 1
+                    elif ipk <= 2.75: buckets[1] += 1
+                    elif ipk <= 3.50: buckets[2] += 1
+                    else: buckets[3] += 1
+            
+            for b in buckets:
+                set_d.append(b)
+                
             series_d.append(set_d)
             
             ch_d = QChart()
             ch_d.addSeries(series_d)
             ch_d.setTitle("Sebaran IPK")
             
+            categories_ipk = ["< 2.00", "2.00 - 2.75", "2.76 - 3.50", "> 3.50"]
             ax_d = QBarCategoryAxis()
-            ax_d.append(["<2.00", "2.00-2.75", "2.76-3.50", ">3.50"])
+            ax_d.append(categories_ipk)
             if self.is_dark: ax_d.setLabelsColor(QColor("#F1F5F9"))
             ch_d.addAxis(ax_d, Qt.AlignBottom)
             series_d.attachAxis(ax_d)
             
             ay_d = QValueAxis()
+            ay_d.setRange(0, max(buckets) + 2 if buckets else 5)
+            ay_d.setLabelFormat("%.0f")
             if self.is_dark: ay_d.setLabelsColor(QColor("#F1F5F9"))
             ch_d.addAxis(ay_d, Qt.AlignLeft)
             series_d.attachAxis(ay_d)
@@ -1780,7 +1994,8 @@ class MainWidget(QWidget):
                 ch_d.setTitleBrush(QColor("#F1F5F9"))
                 ch_d.legend().setLabelColor(QColor("#F1F5F9"))
                 
-            cv_d = QChartView(ch_d); cv_d.setRenderHint(QPainter.Antialiasing)
+            cv_d = QChartView(ch_d)
+            cv_d.setRenderHint(QPainter.Antialiasing)
             
             if self.chart_dist.layout().count(): self.chart_dist.layout().itemAt(0).widget().setParent(None)
             self.chart_dist.layout().addWidget(cv_d)
