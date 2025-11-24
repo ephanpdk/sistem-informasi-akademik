@@ -1,3 +1,4 @@
+from sqlite3 import IntegrityError
 import sys
 import bcrypt
 import pandas as pd
@@ -605,22 +606,93 @@ class MahasiswaWidget(QWidget):
 
     def import_xls(self):
         path, _ = QFileDialog.getOpenFileName(self, "File Excel", "", "*.xlsx")
-        if path:
-            try:
-                df = pd.read_excel(path)
-                db = SessionLocal()
-                c = 0
-                for _, r in df.iterrows():
-                    if not db.query(Mahasiswa).filter_by(nim=str(r['NIM'])).first():
-                        db.add(Mahasiswa(nim=str(r['NIM']), nama=r['Nama'], program_studi=r['Prodi'], gender=r['Gender'], tahun_masuk=int(r['Tahun']), status='Aktif'))
-                        c+=1
+        if not path:
+            return
+
+        required_cols = [
+            'nim', 'nama', 'program_studi', 'gender', 
+            'tahun_masuk', 'tanggal_lahir', 'status', 'dosen_wali_id'
+        ]
+        
+        db = SessionLocal()
+        success_count = 0
+        fail_count = 0
+
+        try:
+            df = pd.read_excel(path)
+
+            if not all(col in df.columns for col in required_cols):
+                QMessageBox.critical(
+                    self, 
+                    "Error Impor", 
+                    f"File Excel harus memiliki kolom wajib: {', '.join(required_cols)}"
+                )
+                return
+
+            df['tanggal_lahir'] = pd.to_datetime(df['tanggal_lahir'], errors='coerce')
+
+            for index, r in df.iterrows():
+                nim = str(r['nim']).strip()
+                dosen_id = r['dosen_wali_id']
+
+                if pd.notna(dosen_id):
+                    dosen_id = int(dosen_id)
+                else:
+                    dosen_id = None
                 
-                if c > 0:
-                    log_activity(self.username, "IMPORT", "Mahasiswa", f"Import {c} data mahasiswa")
+                try:
+                    if dosen_id is not None:
+                        dosen_exists = db.query(Dosen).filter(Dosen.id == dosen_id).first()
+                        if not dosen_exists:
+                            raise ValueError(f"Dosen Wali ID ({dosen_id}) tidak ditemukan.")
+                    
+                    if db.query(Mahasiswa).filter(Mahasiswa.nim == nim).first():
+                        print(f"Gagal impor NIM {nim}: Duplikat di database.")
+                        fail_count += 1
+                        continue
+
+                    new_mahasiswa = Mahasiswa(
+                        nim=nim,
+                        nama=r['nama'],
+                        program_studi=r['program_studi'],
+                        gender=r['gender'],
+                        tahun_masuk=int(r['tahun_masuk']),
+                        tanggal_lahir=r['tanggal_lahir'].date() if pd.notna(r['tanggal_lahir']) else None,
+                        status=r['status'],
+                        dosen_wali_id=dosen_id
+                    )
+                    
+                    db.add(new_mahasiswa)
+                    success_count += 1
+
+                except IntegrityError as e:
+                    db.rollback()
+                    fail_count += 1
+                    error_msg = str(e.orig)
+                    if 'mahasiswa_nim_key' in error_msg:
+                        print(f"Gagal impor NIM {nim}: Duplikat.")
+                    elif 'dosen_wali_id_fkey' in error_msg:
+                        print(f"Gagal impor NIM {nim}: Dosen Wali ID {dosen_id} tidak valid.")
+                    else:
+                        print(f"Gagal impor NIM {nim}: Error DB tak terduga: {error_msg}")
                 
-                db.commit(); db.close(); self.load_data()
-                QMessageBox.information(self, "Import", f"{c} Data Masuk")
-            except Exception as e: QMessageBox.critical(self, "Error", str(e))
+                except Exception as e:
+                    fail_count += 1
+                    print(f"Gagal impor baris {index + 2}: Error data: {str(e)}")
+                    
+            if success_count > 0:
+                log_activity(self.username, "IMPORT", "Mahasiswa", f"Import {success_count} data mahasiswa")
+                
+            db.commit()
+            self.load_data()
+            
+            QMessageBox.information(self, "Import Selesai", f"{success_count} Data Berhasil Diimpor. Gagal: {fail_count}")
+
+        except Exception as e: 
+            db.rollback()
+            QMessageBox.critical(self, "Error", str(e))
+        finally:
+            db.close()
 
     def export_xls(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export", "mahasiswa.xlsx", "*.xlsx")

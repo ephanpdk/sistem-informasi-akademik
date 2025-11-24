@@ -2,8 +2,7 @@ import pandas as pd
 from faker import Faker
 import random
 from collections import defaultdict
-
-print("Memulai proses pembuatan data dummy...")
+import os
 
 # Inisialisasi Faker
 fake = Faker('id_ID')
@@ -21,8 +20,6 @@ PRODI_KODE = {
 
 JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
 
-# LIST GELAR YANG DIMINTA
-# Saya pasangkan dengan gelar S2 agar terlihat seperti dosen sungguhan
 GELAR_MAPPING = {
     "S.Kom": "M.Kom",
     "S.E": "M.M",
@@ -31,62 +28,148 @@ GELAR_MAPPING = {
 }
 
 def get_gelar_dosen():
-    """Mengambil acak gelar S1 dan memasangkannya dengan S2"""
     s1 = random.choice(list(GELAR_MAPPING.keys()))
     s2 = GELAR_MAPPING[s1]
     return f"{s1}, {s2}"
 
+# Daftar ID Dosen yang mungkin sudah ada di database (Asumsi ID 1 sampai 50)
+dosen_ids = list(range(1, 51))
+
 # ====================================================================
-# FUNGSI 1: GENERATOR MAHASISWA (Tidak Berubah)
+# FUNGSI 1: GENERATOR MAHASISWA
 # ====================================================================
-def generate_students(num_students=200):
-    print(f"Membuat {num_students} data mahasiswa...")
+
+def generator_mahasiswa(num_of_students, existing_excel_file, filename="data_mahasiswa_dummy.xlsx"):
+    print(f"Memulai pembuatan {num_of_students} data Mahasiswa baru...")
+    
+    # --- 1. Ekstraksi data dari file yang ada ---
+    existing_nims = set()
+    max_tahun_masuk = 2024 # Default minimal tahun masuk jika file lama tidak terbaca
+    try:
+        # Membaca file CSV yang diunggah
+        df_existing = pd.read_csv(existing_excel_file, usecols=['NIM', 'Thn'])
+        
+        # Mengubah NIM lama menjadi string dan menambahkannya ke set
+        existing_nims.update(df_existing['NIM'].astype(str).tolist())
+        
+        # Mendapatkan tahun masuk maksimum dari data lama
+        max_tahun_masuk = df_existing['Thn'].max()
+        
+    except Exception as e:
+        print(f"Peringatan: Gagal membaca file yang ada ({existing_excel_file}). Menggunakan tahun masuk maksimum default ({max_tahun_masuk}). Error: {e}")
+
+    # --- 2. Tentukan Tahun Masuk Baru ---
+    # Tahun Masuk baru harus lebih besar dari yang ada (minimal 2025)
+    new_start_year = max(2025, max_tahun_masuk + 1)
+    
+    # Opsi tahun masuk untuk data dummy baru: new_start_year, new_start_year + 1, dst.
+    tahun_masuk_pilihan = list(range(new_start_year, new_start_year + 3)) 
+    print(f"-> Data dummy akan menggunakan Tahun Masuk: {min(tahun_masuk_pilihan)} - {max(tahun_masuk_pilihan)}")
+    
     data = []
-    nim_counters = defaultdict(int)
+    generated_nims = set()
+    counter = defaultdict(lambda: defaultdict(int)) 
+    
+    # --- 3. Generate Data Baru ---
+    for i in range(1, num_of_students + 1):
+        prodi = random.choice(list(PRODI_KODE.keys()))
+        prodi_kode = PRODI_KODE[prodi]
 
-    for _ in range(num_students):
+        tahun_masuk = random.choice(tahun_masuk_pilihan)
+        
+        counter[tahun_masuk][prodi_kode] += 1
+        nomor_urut = str(counter[tahun_masuk][prodi_kode]).zfill(3)
+        nim = f"{tahun_masuk % 100}{prodi_kode}{nomor_urut}"
+        
+        # Pastikan NIM unik (di dalam file ini dan tidak ada di file lama)
+        while nim in generated_nims or nim in existing_nims:
+            counter[tahun_masuk][prodi_kode] += 1
+            nomor_urut = str(counter[tahun_masuk][prodi_kode]).zfill(3)
+            nim = f"{tahun_masuk % 100}{prodi_kode}{nomor_urut}"
+            
+        generated_nims.add(nim)
+        
         gender = random.choice(['L', 'P'])
+        
         if gender == 'L':
-            nama = f"{fake.first_name_male()} {fake.last_name_male()}"
+            first = fake.first_name_male()
+            last = fake.last_name_male()
         else:
-            nama = f"{fake.first_name_female()} {fake.last_name_female()}"
+            first = fake.first_name_female()
+            last = fake.last_name_female()
+            
+        nama_lengkap = f"{first} {last}"
+        
+        # Mahasiswa baru harus Aktif
+        status = 'Aktif' 
 
-        status = random.choices(["Aktif", "Cuti", "Lulus"], weights=[8, 1, 1], k=1)[0]
-        tahun_masuk = random.choice([2021, 2022, 2023, 2024, 2025])
-        # Logika tanggal lahir sederhana
-        tahun_lahir = tahun_masuk - random.randint(18, 20)
-        tanggal_lahir = fake.date_of_birth(minimum_age=18, maximum_age=22).replace(year=tahun_lahir)
-
-        prodi_nama = random.choice(list(PRODI_KODE.keys()))
-        kode_prodi = PRODI_KODE[prodi_nama]
-
-        key = f"{tahun_masuk}_{kode_prodi}"
-        nim_counters[key] += 1
-        urut = f"{nim_counters[key]:03d}"
-        nim = f"{tahun_masuk % 100:02d}{kode_prodi}{urut}"
+        # Batasan usia yang masuk akal: 17 sampai 20 tahun
+        tgl_lahir = fake.date_of_birth(minimum_age=17, maximum_age=20).strftime('%Y-%m-%d')
+        
+        dosen_wali = random.choice(dosen_ids + [pd.NA] * 5) # Tambahkan kemungkinan NaN
 
         data.append({
-            "NIM": nim,
-            "Nama": nama,
-            "Program Studi": prodi_nama,
-            "Gender": gender,
-            "Tahun Masuk": tahun_masuk,
-            "Tanggal Lahir": tanggal_lahir,
-            "Status": status
+            "nim": nim,
+            "nama": nama_lengkap,
+            "program_studi": prodi,
+            "gender": gender,
+            "tahun_masuk": tahun_masuk,
+            "tanggal_lahir": tgl_lahir,
+            "status": status,
+            "dosen_wali_id": dosen_wali
         })
 
-    df = pd.DataFrame(data)
-    df.to_excel("data_mahasiswa_baru.xlsx", index=False)
-    print("-> SUKSES! File 'data_mahasiswa_baru.xlsx' telah dibuat.")
+    # ====================================================================
+    # TAMBAHAN UNTUK MENGUJI VALIDASI
+    # ====================================================================
+    
+    # 1. Baris dengan NIM Duplikat (menguji Mahasiswa.nim == nim check)
+    if existing_nims:
+        data.append({
+            "nim": random.choice(list(existing_nims)), # Menggunakan NIM yang sudah ada di DB
+            "nama": "DUPLIKAT NIM LAMA (Gagal)",
+            "program_studi": "Informatika",
+            "gender": "L",
+            "tahun_masuk": 2021,
+            "tanggal_lahir": fake.date_of_birth().strftime('%Y-%m-%d'),
+            "status": "Aktif",
+            "dosen_wali_id": random.choice(dosen_ids)
+        })
 
+    # 2. Baris dengan Dosen Wali ID yang TIDAK ADA (menguji Foreign Key/ValueError)
+    non_existent_dosen_id = max(dosen_ids) + 1 if dosen_ids else 9999
+    # Menggunakan tahun masuk baru untuk NIM baru yang gagal
+    nim_fail_fk = f"{tahun_masuk_pilihan[-1] % 100}99{random.randint(100, 999)}" 
+    data.append({
+        "nim": nim_fail_fk,
+        "nama": "DOSEN TIDAK ADA (Gagal FK)",
+        "program_studi": "Sistem Informasi",
+        "gender": "P",
+        "tahun_masuk": tahun_masuk_pilihan[-1],
+        "tanggal_lahir": fake.date_of_birth().strftime('%Y-%m-%d'),
+        "status": "Aktif",
+        "dosen_wali_id": non_existent_dosen_id
+    })
+    
+    df = pd.DataFrame(data)
+    
+    # Konversi None menjadi NaN (jika belum) dan simpan ke Excel
+    df['tanggal_lahir'] = df['tanggal_lahir'].replace({None: pd.NA})
+    df['dosen_wali_id'] = df['dosen_wali_id'].replace({None: pd.NA})
+    
+    df.to_excel(filename, index=False)
+    print(f"-> SUKSES! File '{filename}' telah dibuat. Terdapat {len(existing_nims)} NIM lama yang dicek.")
+    return df
+    
 # ====================================================================
-# FUNGSI 2: GENERATOR DOSEN (DENGAN GELAR BARU)
+# FUNGSI 2: GENERATOR DOSEN (TIDAK BERUBAH)
 # ====================================================================
-def generate_lecturers(num_lecturers=30):
-    print(f"Membuat {num_lecturers} data dosen...")
+
+def generator_dosen(num_of_lecturers, filename="data_dosen_dummy.xlsx"):
+    print(f"Memulai pembuatan {num_of_lecturers} data Dosen...")
     data = []
 
-    for i in range(num_lecturers):
+    for i in range(1, num_of_lecturers + 1):
         gender = random.choice(['L', 'P'])
         
         if gender == 'L':
@@ -98,12 +181,9 @@ def generate_lecturers(num_lecturers=30):
             first = fake.first_name_female()
             last = fake.last_name_female()
 
-        # --- BAGIAN YANG DIUBAH ---
-        # Menggunakan gelar random dari list yang diminta
         gelar_belakang = get_gelar_dosen()
         
         nama_lengkap = f"{prefix} {first} {last}, {gelar_belakang}"
-        # --------------------------
 
         jabatan = random.choice(JABATAN_LIST)
         nidn = fake.unique.random_number(digits=10)
@@ -119,13 +199,23 @@ def generate_lecturers(num_lecturers=30):
         })
 
     df = pd.DataFrame(data)
-    df.to_excel("data_dosen_baru.xlsx", index=False)
-    print("-> SUKSES! File 'data_dosen_baru.xlsx' (Dengan Gelar S.Kom/S.E/dll) telah dibuat.")
+    df.to_excel(filename, index=False)
+    print(f"-> SUKSES! File '{filename}' telah dibuat.")
+    return df
 
 # ====================================================================
-# JALANKAN FUNGSI
+# JALANKAN GENERATOR 
 # ====================================================================
+
 if __name__ == "__main__":
-    generate_students(100)
-    generate_lecturers(30)
-    print("\nSelesai!")
+    # Nama file excel mahasiswa lama yang digunakan sebagai referensi NIM dan Tahun Masuk maksimum.
+    existing_mahasiswa_file = "mahasiswa.xlsx - Sheet1.csv" 
+    
+    # Ini akan membuat 100 data Mahasiswa baru (NIM lebih besar/baru)
+    generator_mahasiswa(
+        num_of_students=100, 
+        existing_excel_file=existing_mahasiswa_file
+    )
+    
+    # Ini membuat 25 data Dosen (tidak berubah)
+    generator_dosen(num_of_lecturers=25)
