@@ -757,7 +757,7 @@
    'AMD\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\curses\\has_key.py',
    'PYMODULE'),
   ('database_models',
-   'C:\\Sistem Informasi Akademik\\database_models.py',
+   'c:\\Sistem Informasi Akademik\\File Python\\database_models.py',
    'PYMODULE'),
   ('dataclasses',
    'C:\\Users\\MyBook Hype '

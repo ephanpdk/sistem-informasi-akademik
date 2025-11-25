@@ -286,6 +286,8 @@ class LoginWidget(QWidget):
             db.close()
 
 class MahasiswaWidget(QWidget):
+    data_changed = Signal()
+    
     def __init__(self, username):
         super().__init__()
         self.username = username
@@ -525,6 +527,7 @@ class MahasiswaWidget(QWidget):
             db.commit()
             self.load_data()
             self.reset()
+            self.data_changed.emit()
         except Exception as e: 
             db.rollback()
             QMessageBox.critical(self, "Error", str(e))
@@ -564,6 +567,7 @@ class MahasiswaWidget(QWidget):
                 log_activity(self.username, "BATCH UPDATE", "Mahasiswa", f"Update Doswal untuk {updated_count} Mhs")
                 db.commit()
                 self.load_data()
+                self.data_changed.emit()
                 QMessageBox.information(self, "Sukses", f"Berhasil mengupdate {updated_count} mahasiswa.")
         except Exception as e:
             db.rollback()
@@ -582,6 +586,7 @@ class MahasiswaWidget(QWidget):
                     db.commit()
                     self.load_data()
                     self.reset()
+                    self.data_changed.emit()
             except Exception as e:
                 QMessageBox.critical(self, "Error", str(e))
             finally:
@@ -685,7 +690,7 @@ class MahasiswaWidget(QWidget):
                 
             db.commit()
             self.load_data()
-            
+            self.data_changed.emit()
             QMessageBox.information(self, "Import Selesai", f"{success_count} Data Berhasil Diimpor. Gagal: {fail_count}")
 
         except Exception as e: 
@@ -708,6 +713,7 @@ class MahasiswaWidget(QWidget):
             except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
 class DosenWidget(QWidget):
+    data_changed = Signal()
     JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
     
     def __init__(self, username):
@@ -781,6 +787,7 @@ class DosenWidget(QWidget):
                 log_activity(self.username, "IMPORT", "Dosen", f"Import {added} data dosen")
             
             db.commit(); db.close(); self.load_data()
+            self.data_changed.emit()
             QMessageBox.information(self, "Sukses", f"Import: {added} masuk, {skipped} dilewati.")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
@@ -799,6 +806,7 @@ class DosenWidget(QWidget):
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
 class MatakuliahWidget(QWidget):
+    data_changed = Signal()
     PRODI_LIST = ["--Pilih Prodi--"]
     def __init__(self, username):
         super().__init__()
@@ -933,6 +941,7 @@ class MatakuliahWidget(QWidget):
                     QMessageBox.information(self, "Sukses", "Data Diupdate")
 
             db.commit(); self.load_data(); self.reset()
+            self.data_changed.emit()
         except Exception as e: 
             db.rollback(); QMessageBox.critical(self, "Error", str(e))
         finally: db.close()
@@ -946,6 +955,7 @@ class MatakuliahWidget(QWidget):
                     log_activity(self.username, "DELETE", "Matakuliah", f"Hapus MK: {m.kode_mk}")
                     db.delete(m)
                     db.commit(); self.load_data(); self.reset()
+                    self.data_changed.emit()
             finally: db.close()
 
     def filter(self):
@@ -997,6 +1007,7 @@ class MatakuliahWidget(QWidget):
                 log_activity(self.username, "IMPORT", "Matakuliah", f"Import {added} matakuliah")
 
             db.commit(); db.close(); self.load_data()
+            self.data_changed.emit()
             QMessageBox.information(self, "Import", f"Berhasil: {added} data.")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
@@ -1631,16 +1642,24 @@ class MainWidget(QWidget):
         self.stack = QStackedWidget()
         self.dashboard = self.create_dashboard()
         
+        self.mhs_page = MahasiswaWidget(username)
+        self.dosen_page = DosenWidget(username)
+        self.mk_page = MatakuliahWidget(username)
         self.nilai_page = NilaiWidget(username)
+        self.audit_page = AuditLogWidget()
+        self.user_page = PenggunaWidget(username)
         
         self.stack.addWidget(self.dashboard)
-        self.stack.addWidget(MahasiswaWidget(username))
-        self.stack.addWidget(DosenWidget(username))
-        self.stack.addWidget(MatakuliahWidget(username))
+        self.stack.addWidget(self.mhs_page)
+        self.stack.addWidget(self.dosen_page)
+        self.stack.addWidget(self.mk_page)
         self.stack.addWidget(self.nilai_page)
-        self.stack.addWidget(AuditLogWidget())
-        self.stack.addWidget(PenggunaWidget(username))
+        self.stack.addWidget(self.audit_page)
+        self.stack.addWidget(self.user_page)
         
+        self.mhs_page.data_changed.connect(self.update_dashboard_stats)
+        self.dosen_page.data_changed.connect(self.update_dashboard_stats)
+        self.mk_page.data_changed.connect(self.update_dashboard_stats)
         self.nilai_page.data_changed.connect(self.update_dashboard_stats)
 
         self.nav = self.create_nav()
