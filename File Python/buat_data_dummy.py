@@ -106,7 +106,7 @@ def generator_mahasiswa(num_of_students, existing_excel_file, filename="data_mah
         # Batasan usia yang masuk akal: 17 sampai 20 tahun
         tgl_lahir = fake.date_of_birth(minimum_age=17, maximum_age=20).strftime('%Y-%m-%d')
         
-        dosen_wali = random.choice(dosen_ids + [pd.NA] * 5) # Tambahkan kemungkinan NaN
+        dosen_wali = None
 
         data.append({
             "nim": nim,
@@ -133,7 +133,7 @@ def generator_mahasiswa(num_of_students, existing_excel_file, filename="data_mah
             "tahun_masuk": 2021,
             "tanggal_lahir": fake.date_of_birth().strftime('%Y-%m-%d'),
             "status": "Aktif",
-            "dosen_wali_id": random.choice(dosen_ids)
+            "dosen_wali_id": None
         })
 
     # 2. Baris dengan Dosen Wali ID yang TIDAK ADA (menguji Foreign Key/ValueError)
@@ -148,7 +148,7 @@ def generator_mahasiswa(num_of_students, existing_excel_file, filename="data_mah
         "tahun_masuk": tahun_masuk_pilihan[-1],
         "tanggal_lahir": fake.date_of_birth().strftime('%Y-%m-%d'),
         "status": "Aktif",
-        "dosen_wali_id": non_existent_dosen_id
+        "dosen_wali_id": None
     })
     
     df = pd.DataFrame(data)
