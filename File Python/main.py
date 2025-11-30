@@ -296,6 +296,11 @@ class MahasiswaWidget(QWidget):
         self.initUI()
         self.load_data()
 
+    def showEvent(self, event):
+        self.load_doswal()
+        self.load_data()
+        super().showEvent(event)
+
     def initUI(self):
         layout = QHBoxLayout(self); layout.setContentsMargins(20,20,20,20); layout.setSpacing(20)
         
@@ -395,11 +400,6 @@ class MahasiswaWidget(QWidget):
         layout.addWidget(self.form_card); layout.addWidget(self.table_card)
         self.load_doswal()
 
-    def showEvent(self, event):
-        self.load_doswal()
-        self.load_data()
-        super().showEvent(event)
-
     def load_doswal(self):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
@@ -419,7 +419,6 @@ class MahasiswaWidget(QWidget):
         db = SessionLocal()
         try:
             self.table.setRowCount(0)
-            
             list_prodi = set()
             list_tahun = set()
 
@@ -454,7 +453,6 @@ class MahasiswaWidget(QWidget):
             self.f_tahun.addItems(sorted(list(list_tahun)))
             self.f_tahun.setCurrentText(current_tahun)
             self.f_tahun.blockSignals(False)
-
         finally: db.close()
 
     def row_click(self, item):
@@ -504,7 +502,6 @@ class MahasiswaWidget(QWidget):
                 db.add(new_mhs)
                 log_activity(self.username, "CREATE", "Mahasiswa", f"Tambah Mhs: {nim} - {nama}")
                 QMessageBox.information(self, "Sukses", "Data Berhasil Ditambahkan")
-
             else:
                 m = db.query(Mahasiswa).get(self.sel_id)
                 if m:
@@ -521,7 +518,6 @@ class MahasiswaWidget(QWidget):
                         found = self.i_doswal.findText(self.i_doswal.currentText())
                         if found >= 0: doswal_id = self.i_doswal.itemData(found)
                     m.dosen_wali_id = doswal_id
-
                     log_activity(self.username, "UPDATE", "Mahasiswa", f"Update Mhs: {nim} - {nama}")
                     QMessageBox.information(self, "Sukses", "Data Berhasil Diupdate")
             
@@ -542,7 +538,6 @@ class MahasiswaWidget(QWidget):
             return
             
         doswal_id = self.cb_batch_doswal.currentData()
-        
         if self.cb_batch_doswal.currentIndex() < 0:
             found = self.cb_batch_doswal.findText(self.cb_batch_doswal.currentText())
             if found >= 0: doswal_id = self.cb_batch_doswal.itemData(found)
@@ -607,20 +602,26 @@ class MahasiswaWidget(QWidget):
             match_text = t in nim or t in nama
             match_prodi = (fp == "Semua Prodi" or fp == prodi)
             match_tahun = (ft == "Semua Tahun" or ft == tahun)
-            
             self.table.setRowHidden(r, not (match_text and match_prodi and match_tahun))
 
     def import_xls(self):
-        path, _ = QFileDialog.getOpenFileName(self, "File Excel", "", "Excel Files (*.xlsx *.xls)")
+        path, _ = QFileDialog.getOpenFileName(self, "Pilih File Excel", "", "Excel Files (*.xlsx *.xls)")
         if not path: return
         try:
             df = pd.read_excel(path).astype(str)
             df.columns = df.columns.str.strip()
             
-            req = ["NIM", "Nama", "Prodi", "LP", "Thn", "Tgl", "Status", "Doswal"]
+            rename_map = {"LP": "Gender", "Thn": "Tahun Masuk", "Tgl": "Tanggal Lahir"}
+            df.rename(columns=rename_map, inplace=True)
+
+            req = ["NIM", "Nama", "Prodi", "Gender", "Tahun Masuk", "Status", "Doswal"]
             if not all(col in df.columns for col in req):
-                QMessageBox.critical(self, "Error", "Format Excel salah. Pastikan kolom: " + ", ".join(req))
-                return
+                 req_backup = ["NIM", "Nama", "Prodi", "LP", "Thn", "Tgl", "Status", "Doswal"]
+                 if all(col in df.columns for col in req_backup):
+                     df.rename(columns={"LP":"Gender", "Thn":"Tahun Masuk", "Tgl":"Tanggal Lahir"}, inplace=True)
+                 else:
+                    QMessageBox.critical(self, "Error", "Format Excel salah. Pastikan kolom: " + ", ".join(req))
+                    return
             
             db = SessionLocal()
             dosen_map = {d.nama.strip().lower(): d.id for d in db.query(Dosen).all()}
@@ -628,29 +629,33 @@ class MahasiswaWidget(QWidget):
             added, skipped = 0, 0
             for _, r in df.iterrows():
                 nim = r["NIM"].strip()
-                if db.query(Mahasiswa).filter(Mahasiswa.nim==nim).first():
+                if not nim or nim.lower() == 'nan' or db.query(Mahasiswa).filter(Mahasiswa.nim==nim).first():
                     skipped += 1; continue
                 
-                doswal_nama = r["Doswal"].strip()
+                doswal_nama = str(r["Doswal"]).strip()
                 doswal_id = None
                 for d_name, d_id in dosen_map.items():
                     if d_name in doswal_nama.lower() or doswal_nama.lower() in d_name:
                         doswal_id = d_id
                         break
 
-                tgl_str = r["Tgl"].strip()
+                tgl_str = str(r.get("Tanggal Lahir", r.get("Tgl", ""))).strip()
                 tgl_lahir = None
                 try:
-                    if tgl_str and tgl_str != "nan":
+                    if tgl_str and tgl_str.lower() != "nan":
                         tgl_lahir = pd.to_datetime(tgl_str).date()
+                except: pass
+
+                thn_val = 0
+                try: thn_val = int(float(r["Tahun Masuk"]))
                 except: pass
 
                 db.add(Mahasiswa(
                     nim=nim,
                     nama=r["Nama"].strip(),
                     program_studi=r["Prodi"].strip(),
-                    gender=r["LP"].strip(),
-                    tahun_masuk=int(float(r["Thn"])) if r["Thn"].replace('.','').isdigit() else 0,
+                    gender=r["Gender"].strip(),
+                    tahun_masuk=thn_val,
                     tanggal_lahir=tgl_lahir,
                     status=r["Status"].strip(),
                     dosen_wali_id=doswal_id
@@ -669,17 +674,26 @@ class MahasiswaWidget(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Simpan File Excel", "export_mahasiswa.xlsx", "Excel Files (*.xlsx)")
         if not path: return
         data = []
-        headers = ["NIM", "Nama", "Prodi", "LP", "Thn", "Tgl", "Status", "Doswal"]
+        headers = ["NIM", "Nama", "Prodi", "Gender", "Tahun Masuk", "Tanggal Lahir", "Status", "Doswal"]
         for r in range(self.table.rowCount()):
             if not self.table.isRowHidden(r):
-                row = [self.table.item(r, c).text() for c in range(1,9)]
+                row = [
+                    self.table.item(r, 1).text(),
+                    self.table.item(r, 2).text(),
+                    self.table.item(r, 3).text(),
+                    self.table.item(r, 4).text(),
+                    self.table.item(r, 5).text(),
+                    self.table.item(r, 6).text(),
+                    self.table.item(r, 7).text(),
+                    self.table.item(r, 8).text()
+                ]
                 data.append(row)
         try:
             pd.DataFrame(data, columns=headers).to_excel(path, index=False)
             log_activity(self.username, "EXPORT", "Mahasiswa", "Export data mahasiswa ke Excel")
             QMessageBox.information(self, "Sukses", f"Data berhasil diekspor ke:\n{path}")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
-
+        
 class DosenWidget(QWidget):
     data_changed = Signal()
     JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
@@ -689,6 +703,10 @@ class DosenWidget(QWidget):
         self.username = username
         self.initUI()
         self.load_data()
+
+    def showEvent(self, event):
+        self.load_data()
+        super().showEvent(event)
 
     def initUI(self):
         layout = QVBoxLayout(self); layout.setContentsMargins(20,20,20,20)
@@ -731,6 +749,7 @@ class DosenWidget(QWidget):
         try:
             df = pd.read_excel(path).astype(str)
             df.columns = df.columns.str.strip()
+            
             req = ["NIDN", "Nama", "Gender", "Jabatan", "Email"]
             if not all(col in df.columns for col in req):
                 QMessageBox.critical(self, "Error", "Format Excel salah. Pastikan kolom: " + ", ".join(req))
@@ -743,18 +762,14 @@ class DosenWidget(QWidget):
                 email = r["Email"].strip()
                 jabatan = r["Jabatan"].strip()
                 gender = r["Gender"].strip()
-                nama = r["Nama"].strip()
-
+                
                 if db.query(Dosen).filter((Dosen.nidn==nidn)|(Dosen.email==email)).first():
                     skipped += 1; continue
                 
-                if jabatan not in self.JABATAN_LIST:
-                    skipped += 1; continue
-                    
-                if gender not in ['L', 'P']:
+                if jabatan not in self.JABATAN_LIST or gender not in ['L', 'P']:
                     skipped += 1; continue
                 
-                db.add(Dosen(nidn=nidn, nama=nama, gender=gender, jabatan_akademik=jabatan, email=email))
+                db.add(Dosen(nidn=nidn, nama=r["Nama"].strip(), gender=gender, jabatan_akademik=jabatan, email=email))
                 added += 1
             
             if added > 0:
@@ -769,7 +784,7 @@ class DosenWidget(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Simpan File Excel", "export_dosen.xlsx", "Excel Files (*.xlsx)")
         if not path: return
         data = []
-        headers = [self.table.horizontalHeaderItem(c).text() for c in range(self.table.columnCount())]
+        headers = ["NIDN", "Nama", "Gender", "Jabatan", "Email"]
         for r in range(self.table.rowCount()):
             row = [self.table.item(r, c).text() if self.table.item(r, c) else "" for c in range(self.table.columnCount())]
             data.append(row)
@@ -789,6 +804,10 @@ class MatakuliahWidget(QWidget):
         self.selected_id = None
         self.initUI()
         self.load_data()
+
+    def showEvent(self, event):
+        self.load_data()
+        super().showEvent(event)
 
     def initUI(self):
         layout = QHBoxLayout(self); layout.setContentsMargins(20,20,20,20); layout.setSpacing(20)
@@ -907,7 +926,6 @@ class MatakuliahWidget(QWidget):
                 ))
                 log_activity(self.username, "CREATE", "Matakuliah", f"Tambah MK: {kode} - {nama}")
                 QMessageBox.information(self, "Sukses", "Data Disimpan")
-                
             else:
                 m = db.query(Matakuliah).get(self.selected_id)
                 if m:
@@ -963,23 +981,17 @@ class MatakuliahWidget(QWidget):
             for i, row in df_check.iterrows():
                 vals = [str(v).strip() for v in row.values]
                 if ("Kode MK" in vals or "Kode" in vals) and ("SKS" in vals):
-                    header_row = i
-                    break
+                    header_row = i; break
             
             df = pd.read_excel(path, header=header_row, dtype=str)
             df.columns = df.columns.str.strip()
             
-            column_mapping = {
-                "Kode": "Kode MK",
-                "Matakuliah": "Nama Matakuliah",
-                "Smt": "Semester",
-                "Prodi": "Program Studi"
-            }
+            column_mapping = { "Kode": "Kode MK", "Matakuliah": "Nama Matakuliah", "Smt": "Semester", "Prodi": "Program Studi" }
             df.rename(columns=column_mapping, inplace=True)
 
             req = ["Kode MK", "Nama Matakuliah", "SKS", "Semester", "Program Studi"]
             if not all(col in df.columns for col in req):
-                QMessageBox.critical(self, "Error", "Format Salah. Wajib ada kolom:\n" + ", ".join(req))
+                QMessageBox.critical(self, "Error", "Format Excel salah. Pastikan kolom: " + ", ".join(req))
                 return
             
             db = SessionLocal()
@@ -987,62 +999,29 @@ class MatakuliahWidget(QWidget):
             
             for _, r in df.iterrows():
                 kode = str(r["Kode MK"]).strip()
-                if kode.lower() == 'nan' or not kode: 
-                    skipped += 1
-                    continue
-                
-                if db.query(Matakuliah).filter(Matakuliah.kode_mk==kode).first():
-                    skipped += 1
-                    continue
+                if not kode or kode.lower() == 'nan' or db.query(Matakuliah).filter(Matakuliah.kode_mk==kode).first():
+                    skipped += 1; continue
                 
                 try:
-                    sks_raw = str(r["SKS"]).strip()
-                    smt_raw = str(r["Semester"]).strip()
-                    
-                    sks_val = 0
-                    if sks_raw and sks_raw.lower() != 'nan':
-                        try:
-                            sks_val = int(float(sks_raw))
-                        except: sks_val = 0
-                    
-                    smt_val = 0
-                    if smt_raw and smt_raw.lower() != 'nan':
-                        try:
-                            smt_val = int(float(smt_raw))
-                        except: smt_val = 0
+                    sks_val = int(float(str(r["SKS"]).strip())) if str(r["SKS"]).strip().lower() != 'nan' else 0
+                    smt_val = int(float(str(r["Semester"]).strip())) if str(r["Semester"]).strip().lower() != 'nan' else 0
+                    nama_mk = str(r["Nama Matakuliah"]).strip(); nama_mk = "" if nama_mk.lower() == 'nan' else nama_mk
+                    prodi_mk = str(r["Program Studi"]).strip(); prodi_mk = "" if prodi_mk.lower() == 'nan' else prodi_mk
 
-                    nama_mk = str(r["Nama Matakuliah"]).strip()
-                    if nama_mk.lower() == 'nan': nama_mk = ""
-                    
-                    prodi_mk = str(r["Program Studi"]).strip()
-                    if prodi_mk.lower() == 'nan': prodi_mk = ""
-
-                    db.add(Matakuliah(
-                        kode_mk=kode,
-                        nama_matakuliah=nama_mk,
-                        sks=sks_val,
-                        semester=smt_val,
-                        program_studi=prodi_mk
-                    ))
+                    db.add(Matakuliah(kode_mk=kode, nama_matakuliah=nama_mk, sks=sks_val, semester=smt_val, program_studi=prodi_mk))
                     added += 1
-                except:
-                    skipped += 1
+                except: skipped += 1
             
             if added > 0:
                 log_activity(self.username, "IMPORT", "Matakuliah", f"Import {added} matakuliah")
-                db.commit()
-                QMessageBox.information(self, "Sukses", f"Berhasil: {added} data masuk.\nDilewati: {skipped}.")
-            else:
-                 QMessageBox.warning(self, "Info", "Tidak ada data baru yang ditambahkan.")
-                 
-            db.close(); self.load_data()
-            self.data_changed.emit()
             
-        except Exception as e: 
-            QMessageBox.critical(self, "Error System", str(e))
+            db.commit(); db.close(); self.load_data()
+            self.data_changed.emit()
+            QMessageBox.information(self, "Sukses", f"Import: {added} masuk, {skipped} dilewati.")
+        except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
     def export_xls(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Simpan File Excel", "backup_matakuliah.xlsx", "Excel Files (*.xlsx)")
+        path, _ = QFileDialog.getSaveFileName(self, "Simpan File Excel", "export_matakuliah.xlsx", "Excel Files (*.xlsx)")
         if not path: return
         data = []
         headers = ["Kode MK", "Nama Matakuliah", "SKS", "Semester", "Program Studi"]
@@ -1060,7 +1039,7 @@ class MatakuliahWidget(QWidget):
         try:
             pd.DataFrame(data, columns=headers).to_excel(path, index=False)
             log_activity(self.username, "EXPORT", "Matakuliah", "Export data matakuliah ke Excel")
-            QMessageBox.information(self, "Sukses", f"Backup berhasil diekspor ke:\n{path}")
+            QMessageBox.information(self, "Sukses", f"Data berhasil diekspor ke:\n{path}")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
 
 class NilaiWidget(QWidget):
