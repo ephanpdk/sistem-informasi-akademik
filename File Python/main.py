@@ -2056,7 +2056,7 @@ class MainWidget(QWidget):
             for b in buckets: set_d.append(b)
             series_d.append(set_d)
             ch_d = QChart(); ch_d.addSeries(series_d); ch_d.setTitle("Sebaran IPK")
-            ax_d = QBarCategoryAxis(); ax_d.append(["< 2.00", "2.00-2.75", "2.76-3.50", "> 3.50"])
+            ax_d = QBarCategoryAxis(); ax_d.append(["< 2.00", "2.00-2.75", "2.76-3.50", "> 3.50"]) 
             if self.is_dark: ax_d.setLabelsColor(QColor("#F1F5F9"))
             ch_d.addAxis(ax_d, Qt.AlignBottom); series_d.attachAxis(ax_d)
             ay_d = QValueAxis(); ay_d.setRange(0, max(buckets)+2 if buckets else 5)
@@ -2125,13 +2125,17 @@ class MainWidget(QWidget):
                     self.table_top10.insertRow(i)
                     self.table_top10.setItem(i,0,QTableWidgetItem(m.nim)); self.table_top10.setItem(i,1,QTableWidgetItem(m.nama)); self.table_top10.setItem(i,2,QTableWidgetItem(m.program_studi)); self.table_top10.setItem(i,3,QTableWidgetItem(f"{ipk:.2f}"))
 
-            curr_yr = datetime.now().year; limit_yr = curr_yr - 5
-            late_mhs = db.query(Mahasiswa).filter(Mahasiswa.tahun_masuk <= limit_yr, Mahasiswa.status == "Aktif").all()
-            self.table_late.setRowCount(0); self.table_late.setColumnCount(4); self.table_late.setHorizontalHeaderLabels(["NIM", "Nama", "Angkatan", "Lama"])
+            lowest_gpa = sorted(final_gpa_map.items(), key=lambda x: x[1])[:5]
+            self.table_late.setRowCount(0); self.table_late.setColumnCount(4); self.table_late.setHorizontalHeaderLabels(["NIM", "Nama", "Prodi", "IPK"])
             self.table_late.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-            for i, m in enumerate(late_mhs):
-                self.table_late.insertRow(i)
-                self.table_late.setItem(i,0,QTableWidgetItem(m.nim)); self.table_late.setItem(i,1,QTableWidgetItem(m.nama)); self.table_late.setItem(i,2,QTableWidgetItem(str(m.tahun_masuk))); self.table_late.setItem(i,3,QTableWidgetItem(f"{curr_yr - m.tahun_masuk} Thn"))
+            for i, (mid, ipk) in enumerate(lowest_gpa):
+                m = db.query(Mahasiswa).get(mid)
+                if m:
+                    self.table_late.insertRow(i)
+                    self.table_late.setItem(i,0,QTableWidgetItem(m.nim))
+                    self.table_late.setItem(i,1,QTableWidgetItem(m.nama))
+                    self.table_late.setItem(i,2,QTableWidgetItem(m.program_studi))
+                    self.table_late.setItem(i,3,QTableWidgetItem(f"{ipk:.2f}"))
 
             gen_data = db.query(Mahasiswa.program_studi, Mahasiswa.gender, func.count(Mahasiswa.id)).group_by(Mahasiswa.program_studi, Mahasiswa.gender).all()
             data_map = defaultdict(lambda: {'L': 0, 'P': 0}); cats_g = set()
@@ -2167,6 +2171,7 @@ class MainWidget(QWidget):
                 if d: doswal_avg.append((d.nama, sum(gpas)/len(gpas)))
             doswal_avg.sort(key=lambda x: x[1], reverse=True)
             top_doswal = doswal_avg[:5]
+            
             series_dp = QHorizontalBarSeries(); series_dp.setLabelsVisible(True); series_dp.setLabelsFormat("@value")
             set_dp = QBarSet("Rata-rata IPK Binaan"); set_dp.setColor(QColor("#F39C12"))
             cats_dp = []
@@ -2174,6 +2179,7 @@ class MainWidget(QWidget):
                 set_dp.append(round(avg, 2)); cats_dp.append(name.split(',')[0][:15]) 
             if not cats_dp: set_dp.append(0); cats_dp.append("-")
             series_dp.append(set_dp)
+            
             ch_dp = QChart(); ch_dp.addSeries(series_dp); ch_dp.setTitle("Top Kinerja Dosen Wali")
             ax_dpx = QBarCategoryAxis(); ax_dpx.append(cats_dp)
             if self.is_dark: ax_dpx.setLabelsColor(QColor("#F1F5F9"))
@@ -2181,6 +2187,7 @@ class MainWidget(QWidget):
             ax_dpy = QValueAxis(); ax_dpy.setRange(0, 4.0)
             if self.is_dark: ax_dpy.setLabelsColor(QColor("#F1F5F9"))
             ch_dp.addAxis(ax_dpy, Qt.AlignBottom); series_dp.attachAxis(ax_dpy)
+            
             ch_dp.setTheme(theme); ch_dp.setBackgroundBrush(Qt.NoBrush); ch_dp.legend().setVisible(False)
             if self.is_dark: ch_dp.setTitleBrush(QColor("#F1F5F9"))
             cv_dp = QChartView(ch_dp); cv_dp.setRenderHint(QPainter.Antialiasing)
