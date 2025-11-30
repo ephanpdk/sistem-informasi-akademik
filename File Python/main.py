@@ -269,8 +269,9 @@ class LoginWidget(QWidget):
             return
             
         if 'SessionLocal' not in globals() or SessionLocal is None:
-            QMessageBox.information(self, "Dev Mode", "Database tidak ditemukan. Masuk sebagai Admin Dev.")
-            self.login_success_signal.emit("DevAdmin", "Admin Manajemen")
+            QMessageBox.information(self, "Dev Mode", "Database tidak ditemukan. Masuk sebagai DevAdmin.")
+            
+            self.login_success_signal.emit("DevAdmin", "Admin Manajemen") 
             return
 
         db = SessionLocal()
@@ -914,7 +915,7 @@ class MatakuliahWidget(QWidget):
             kode = self.i_kode.text()
             nama = self.i_nama.text()
             
-            # CREATE
+            
             if not self.selected_id:
                 if db.query(Matakuliah).filter_by(kode_mk=kode).first():
                     QMessageBox.warning(self, "Error", "Kode MK sudah ada")
@@ -928,7 +929,7 @@ class MatakuliahWidget(QWidget):
                 log_activity(self.username, "CREATE", "Matakuliah", f"Tambah MK: {kode} - {nama}")
                 QMessageBox.information(self, "Sukses", "Data Disimpan")
                 
-            # UPDATE
+            
             else:
                 m = db.query(Matakuliah).get(self.selected_id)
                 if m:
@@ -1339,7 +1340,7 @@ class NilaiWidget(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
 class PenggunaWidget(QWidget):
-    ROLE_LIST = ["Admin Akademik", "Kepala Jurusan", "Rektor", "Admin Manajemen"]
+    ROLE_LIST = ["Admin Manajemen", "Admin Akademik"]
     
     def __init__(self, username): 
         super().__init__()
@@ -1353,7 +1354,6 @@ class PenggunaWidget(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
 
-        # --- Form Section (Kiri) ---
         self.form_card = QFrame()
         self.form_card.setObjectName("form_frame")
         self.form_card.setFixedWidth(320)
@@ -1385,7 +1385,6 @@ class PenggunaWidget(QWidget):
         fl.addLayout(f_grid)
         fl.addStretch()
 
-        # Buttons
         bh = QHBoxLayout()
         self.btn_simpan = QPushButton("Simpan")
         self.btn_simpan.setObjectName("btn_simpan")
@@ -1404,7 +1403,6 @@ class PenggunaWidget(QWidget):
         self.btn_bersihkan.clicked.connect(self.clear_form)
         fl.addWidget(self.btn_bersihkan)
 
-        # --- Table Section (Kanan) ---
         self.table_card = QFrame()
         self.table_card.setObjectName("table_frame")
         add_shadow(self.table_card)
@@ -1412,18 +1410,16 @@ class PenggunaWidget(QWidget):
         tl = QVBoxLayout(self.table_card)
         tl.setContentsMargins(20, 20, 20, 20)
 
-        # Search Bar
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Cari berdasarkan Username atau Role...")
         self.search_input.textChanged.connect(self.filter_table)
         tl.addWidget(self.search_input)
 
-        # Table
         self.table_pengguna = QTableWidget()
         self.table_pengguna.setColumnCount(4)
         self.table_pengguna.setHorizontalHeaderLabels(["#", "ID", "Username", "Role"])
         self.table_pengguna.verticalHeader().hide()
-        self.table_pengguna.setColumnHidden(1, True) # Sembunyikan ID
+        self.table_pengguna.setColumnHidden(1, True)
         self.table_pengguna.setColumnWidth(0, 50)
         self.table_pengguna.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table_pengguna.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
@@ -1434,7 +1430,6 @@ class PenggunaWidget(QWidget):
         
         tl.addWidget(self.table_pengguna)
 
-        # Add to main layout
         layout.addWidget(self.form_card)
         layout.addWidget(self.table_card)
 
@@ -1485,18 +1480,15 @@ class PenggunaWidget(QWidget):
         db_session = SessionLocal()
         
         try:
-            # UPDATE DATA
             if self.selected_pengguna_id:
                 user = db_session.query(Pengguna).get(self.selected_pengguna_id)
                 if user:
-                    # Cek duplikasi username jika diganti
                     if user.username != username:
                         username_ada = db_session.query(Pengguna).filter_by(username=username).first()
                         if username_ada:
                             QMessageBox.warning(self, "Error", f"Username '{username}' sudah terdaftar.")
                             return
                     
-                    # Update password hanya jika diisi
                     if password:
                         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
                         user.hashed_password = hashed_password.decode('utf-8')
@@ -1506,7 +1498,6 @@ class PenggunaWidget(QWidget):
                     log_activity(self.current_username, "UPDATE", "Pengguna", f"Update User: {username}")
                     QMessageBox.information(self, "Sukses", "Data berhasil diperbarui.")
             
-            # CREATE DATA
             else:
                 if not password:
                     QMessageBox.warning(self, "Error", "Password wajib diisi untuk pengguna baru.")
@@ -1680,14 +1671,24 @@ class MainWidget(QWidget):
             return b
         
         l.addWidget(btn("🏠 Dashboard", 0))
-        l.addWidget(btn("🎓 Mahasiswa", 1))
-        l.addWidget(btn("👨‍🏫 Dosen", 2))
-        l.addWidget(btn("📚 Matakuliah", 3))
-        l.addWidget(btn("📝 Penilaian", 4))
-        l.addWidget(btn("📜 Log Sistem", 5))
 
-        if self.role == "Admin Manajemen": 
+        if self.role == "Admin Manajemen":
+            l.addWidget(btn("🎓 Mahasiswa", 1))
+            l.addWidget(btn("👨‍🏫 Dosen", 2))
+            l.addWidget(btn("📚 Matakuliah", 3))
             l.addWidget(btn("👤 Pengguna", 6))
+            l.addWidget(btn("📜 Log Sistem", 5))
+            
+        elif self.role == "Admin Akademik":
+            l.addWidget(btn("📝 Penilaian", 4))
+        
+        else:
+             l.addWidget(btn("🎓 Mahasiswa", 1))
+             l.addWidget(btn("👨‍🏫 Dosen", 2))
+             l.addWidget(btn("📚 Matakuliah", 3))
+             l.addWidget(btn("📝 Penilaian", 4))
+             l.addWidget(btn("📜 Log Sistem", 5))
+             l.addWidget(btn("👤 Pengguna", 6))
 
         l.addStretch()
         
@@ -2137,7 +2138,6 @@ class MainWidget(QWidget):
 
         finally: db.close()
 
-        
 class AppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2155,6 +2155,11 @@ class AppWindow(QMainWindow):
         self.stack.addWidget(self.login)
 
     def on_login(self, user, role):
+        if self.stack.count() > 1:
+            old_widget = self.stack.widget(1)
+            self.stack.removeWidget(old_widget)
+            old_widget.deleteLater()
+
         self.main = MainWidget(user, role, self.is_dark)
         self.main.logout_signal.connect(lambda: self.stack.setCurrentIndex(0))
         self.stack.addWidget(self.main)
