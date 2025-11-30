@@ -34,7 +34,7 @@ try:
     from PySide6.QtCharts import (
         QChart, QChartView, QLineSeries, QValueAxis, 
         QScatterSeries, QBarSeries, QBarSet, QBarCategoryAxis,
-        QPieSeries, QPieSlice, QStackedBarSeries
+        QPieSeries, QPieSlice, QStackedBarSeries, QHorizontalBarSeries, QHorizontalStackedBarSeries
     )
 except ImportError:
     pass
@@ -1055,6 +1055,13 @@ class NilaiWidget(QWidget):
         self.all_matakuliah_map = defaultdict(list)
         self.matakuliah_current_map = {}
         self.initUI()
+        self.load_initial_data()
+
+    def showEvent(self, event):
+        self.load_initial_data()
+        if self.cur_mhs_id:
+            self.load_transkrip()
+        super().showEvent(event)
 
     def initUI(self):
         layout = QVBoxLayout(self); layout.setContentsMargins(20,20,20,20); layout.setSpacing(20)
@@ -1097,18 +1104,19 @@ class NilaiWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.itemClicked.connect(self.row_click)
         
         b_pdf = QPushButton("Cetak Transkrip (PDF)"); b_pdf.setObjectName("btn_simpan"); b_pdf.clicked.connect(self.print_transkrip)
         
         bl.addWidget(self.table); bl.addWidget(b_pdf)
         
         layout.addWidget(top); layout.addWidget(mid); layout.addWidget(bot)
-        self.load_initial_data()
 
     def load_initial_data(self):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
         try:
+            current_mhs_text = self.cb_mhs.currentText()
             self.cb_mhs.clear()
             self.mahasiswa_map = {}
             
@@ -1122,6 +1130,9 @@ class NilaiWidget(QWidget):
             
             self.cb_mhs.setModel(model)
             self.cb_mhs.setModelColumn(0)
+            
+            if current_mhs_text in self.mahasiswa_map:
+                self.cb_mhs.setCurrentText(current_mhs_text)
 
             self.all_matakuliah_map = defaultdict(list)
             for mk in db.query(Matakuliah).all():
@@ -1130,6 +1141,28 @@ class NilaiWidget(QWidget):
                 self.all_matakuliah_map[key].append((disp, {"id": mk.id, "sks": mk.sks}))
         finally:
             db.close()
+
+    def row_click(self, item):
+        row = item.row()
+        try:
+            nid = int(self.table.item(row, 0).text())
+            db = SessionLocal()
+            nilai = db.query(Nilai).get(nid)
+            
+            if nilai and nilai.matakuliah:
+                mk = nilai.matakuliah
+                
+                self.cb_smt.setCurrentText(str(mk.semester))
+                self.update_mk_dropdown()
+                
+                mk_text = f"{mk.kode_mk} - {mk.nama_matakuliah}"
+                self.cb_mk.setCurrentText(mk_text)
+                
+                self.cb_nil.setCurrentText(nilai.nilai_huruf)
+                
+            db.close()
+        except Exception as e:
+            print(f"Row click error: {e}")
 
     def generate_dummy(self):
         db = SessionLocal()
@@ -1943,12 +1976,16 @@ class MainWidget(QWidget):
             ch = QChart(); ch.addSeries(series); ch.setTitle("Tren Mahasiswa")
             ch.setTheme(theme); ch.setBackgroundBrush(Qt.NoBrush); ch.legend().setVisible(False)
             if self.is_dark: ch.setTitleBrush(QColor("#F1F5F9"))
-            axis_x = QValueAxis(); axis_x.setLabelFormat("%.0f"); axis_x.setRange(min_y, max_y); axis_x.setTickCount(int(max_y-min_y)+1 if (max_y-min_y)<10 else 5)
+            
+            axis_x = QValueAxis(); axis_x.setLabelFormat("%.0f"); axis_x.setRange(min_y, max_y)
+            axis_x.setTickCount(int(max_y-min_y)+1 if (max_y-min_y)<10 else 5)
             if self.is_dark: axis_x.setLabelsColor(QColor("#F1F5F9"))
             ch.addAxis(axis_x, Qt.AlignBottom); series.attachAxis(axis_x)
+            
             axis_y = QValueAxis(); axis_y.setRange(0, max_c + 5); axis_y.setLabelFormat("%.0f")
             if self.is_dark: axis_y.setLabelsColor(QColor("#F1F5F9"))
             ch.addAxis(axis_y, Qt.AlignLeft); series.attachAxis(axis_y)
+            
             cv = QChartView(ch); cv.setRenderHint(QPainter.Antialiasing)
             if self.chart_trend.layout().count(): self.chart_trend.layout().itemAt(0).widget().setParent(None)
             self.chart_trend.layout().addWidget(cv)
@@ -1958,7 +1995,6 @@ class MainWidget(QWidget):
             col_map = {"Aktif": "#10B981", "Cuti": "#F59E0B", "Lulus": "#3B82F6", "DO": "#EF4444"}
             tot_stat = sum([c for _, c in stat_data])
             for st, cnt in stat_data:
-                pct = (cnt/tot_stat)*100 if tot_stat else 0
                 sl = series_s.append(f"{st}: {cnt}", cnt)
                 if st in col_map: sl.setColor(QColor(col_map[st]))
                 else: sl.setColor(QColor("#94A3B8"))
@@ -1991,7 +2027,13 @@ class MainWidget(QWidget):
             
             ch_ipk = QChart(); ch_ipk.addSeries(series_ipk); ch_ipk.addSeries(scat_ipk); ch_ipk.setTitle("Tren Rata-rata IPK")
             ch_ipk.legend().setVisible(False)
-            ax_ix = QValueAxis(); ax_ix.setRange(min_yi, max_yi); ax_ix.setLabelFormat("%.0f"); ax_ix.setTickCount(len(years_ipk) if len(years_ipk)>1 else 2)
+            
+            ax_ix = QValueAxis()
+            ax_ix.setLabelFormat("%.0f")
+            ax_ix.setRange(min_yi - 1, max_yi + 1)
+            span_xi = (max_yi + 1) - (min_yi - 1)
+            ax_ix.setTickCount(int(span_xi) + 1 if span_xi < 12 else 6)
+            
             if self.is_dark: ax_ix.setLabelsColor(QColor("#F1F5F9"))
             ch_ipk.addAxis(ax_ix, Qt.AlignBottom); series_ipk.attachAxis(ax_ix); scat_ipk.attachAxis(ax_ix)
             ax_iy = QValueAxis(); ax_iy.setRange(0, 4.0); ax_iy.setLabelFormat("%.2f")
@@ -2100,9 +2142,7 @@ class MainWidget(QWidget):
             set_gp = QBarSet("Perempuan"); set_gp.setColor(QColor("#E91E63"))
             for c in sorted_cats_g: set_gl.append(data_map[c]['L']); set_gp.append(data_map[c]['P'])
             series_gen = QStackedBarSeries()
-            series_gen.setLabelsVisible(True)
-            series_gen.setLabelsFormat("@value")
-            series_gen.setLabelsPosition(QBarSeries.LabelsCenter)
+            series_gen.setLabelsVisible(True); series_gen.setLabelsFormat("@value"); series_gen.setLabelsPosition(QBarSeries.LabelsCenter)
             series_gen.append(set_gl); series_gen.append(set_gp)
             ch_gen = QChart(); ch_gen.addSeries(series_gen); ch_gen.setTitle("Demografi Gender")
             ax_gx = QBarCategoryAxis(); ax_gx.append(sorted_cats_g)
@@ -2121,30 +2161,26 @@ class MainWidget(QWidget):
             for m in all_mhs:
                 if m.dosen_wali_id and m.id in final_gpa_map:
                     doswal_perf[m.dosen_wali_id].append(final_gpa_map[m.id])
-            
             doswal_avg = []
             for did, gpas in doswal_perf.items():
                 d = db.query(Dosen).get(did)
                 if d: doswal_avg.append((d.nama, sum(gpas)/len(gpas)))
-            
             doswal_avg.sort(key=lambda x: x[1], reverse=True)
             top_doswal = doswal_avg[:5]
-            
-            series_dp = QBarSeries(); series_dp.setLabelsVisible(True); series_dp.setLabelsFormat("@value")
+            series_dp = QHorizontalBarSeries(); series_dp.setLabelsVisible(True); series_dp.setLabelsFormat("@value")
             set_dp = QBarSet("Rata-rata IPK Binaan"); set_dp.setColor(QColor("#F39C12"))
             cats_dp = []
             for name, avg in top_doswal:
                 set_dp.append(round(avg, 2)); cats_dp.append(name.split(',')[0][:15]) 
             if not cats_dp: set_dp.append(0); cats_dp.append("-")
             series_dp.append(set_dp)
-            
             ch_dp = QChart(); ch_dp.addSeries(series_dp); ch_dp.setTitle("Top Kinerja Dosen Wali")
             ax_dpx = QBarCategoryAxis(); ax_dpx.append(cats_dp)
             if self.is_dark: ax_dpx.setLabelsColor(QColor("#F1F5F9"))
-            ch_dp.addAxis(ax_dpx, Qt.AlignBottom); series_dp.attachAxis(ax_dpx)
+            ch_dp.addAxis(ax_dpx, Qt.AlignLeft); series_dp.attachAxis(ax_dpx)
             ax_dpy = QValueAxis(); ax_dpy.setRange(0, 4.0)
             if self.is_dark: ax_dpy.setLabelsColor(QColor("#F1F5F9"))
-            ch_dp.addAxis(ax_dpy, Qt.AlignLeft); series_dp.attachAxis(ax_dpy)
+            ch_dp.addAxis(ax_dpy, Qt.AlignBottom); series_dp.attachAxis(ax_dpy)
             ch_dp.setTheme(theme); ch_dp.setBackgroundBrush(Qt.NoBrush); ch_dp.legend().setVisible(False)
             if self.is_dark: ch_dp.setTitleBrush(QColor("#F1F5F9"))
             cv_dp = QChartView(ch_dp); cv_dp.setRenderHint(QPainter.Antialiasing)
