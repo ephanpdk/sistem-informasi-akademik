@@ -313,17 +313,9 @@ class MahasiswaWidget(QWidget):
         f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
         self.i_nim = QLineEdit(); self.i_nim.setPlaceholderText("NIM")
         self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama Lengkap")
-        
-        self.i_prodi = QComboBox()
-        self.i_prodi.addItems(["Sistem Informasi", "Informatika", "Manajemen", "DKV"])
-        
+        self.i_prodi = QLineEdit()
         self.i_gen = QComboBox(); self.i_gen.addItems(["L", "P"])
-        
-        self.i_thn = QComboBox()
-        current_year = datetime.now().year
-        for y in range(current_year - 10, current_year + 5):
-            self.i_thn.addItem(str(y))
-            
+        self.i_thn = QLineEdit(); self.i_thn.setValidator(QIntValidator(2000,2100))
         self.i_tgl = QDateEdit(); self.i_tgl.setCalendarPopup(True); self.i_tgl.setDisplayFormat("dd/MM/yyyy")
         self.i_stat = QComboBox(); self.i_stat.addItems(["Aktif", "Lulus", "Cuti", "DO"])
         
@@ -468,9 +460,9 @@ class MahasiswaWidget(QWidget):
         self.sel_id = int(self.table.item(r,0).text())
         self.i_nim.setText(self.table.item(r,1).text())
         self.i_nama.setText(self.table.item(r,2).text())
-        self.i_prodi.setCurrentText(self.table.item(r,3).text())
+        self.i_prodi.setText(self.table.item(r,3).text())
         self.i_gen.setCurrentText(self.table.item(r,4).text())
-        self.i_thn.setCurrentText(self.table.item(r,5).text())
+        self.i_thn.setText(self.table.item(r,5).text())
         tgl = self.table.item(r,6).text()
         if tgl != "-": self.i_tgl.setDate(QDate.fromString(tgl, "dd/MM/yyyy"))
         self.i_stat.setCurrentText(self.table.item(r,7).text())
@@ -482,10 +474,7 @@ class MahasiswaWidget(QWidget):
 
     def reset(self):
         self.sel_id = None
-        self.i_nim.clear()
-        self.i_nama.clear()
-        self.i_prodi.setCurrentIndex(0)
-        self.i_thn.setCurrentIndex(0)
+        self.i_nim.clear(); self.i_nama.clear(); self.i_prodi.clear(); self.i_thn.clear()
         self.i_doswal.setCurrentIndex(0)
 
     def save(self):
@@ -493,13 +482,17 @@ class MahasiswaWidget(QWidget):
         try:
             nim = self.i_nim.text()
             nama = self.i_nama.text()
-            prodi = self.i_prodi.currentText()
-            angkatan_str = self.i_thn.currentText()
+            angkatan_str = self.i_thn.text()
+            prodi = self.i_prodi.text()
             
             if not nim or len(nim) < 4:
                 QMessageBox.warning(self, "Invalid Input", "NIM minimal 4 digit.")
                 return
-            
+                
+            if not angkatan_str:
+                QMessageBox.warning(self, "Invalid Input", "Angkatan harus diisi.")
+                return
+
             nim_prefix = nim[:2]
             angkatan_suffix = angkatan_str[-2:]
             
@@ -508,18 +501,9 @@ class MahasiswaWidget(QWidget):
                 return
 
             nim_prodi_code = nim[2:4]
-            prodi_codes = {
-                "Sistem Informasi": "01",
-                "Informatika": "02",
-                "Manajemen": "03",
-                "DKV": "04"
-            }
-            
-            if prodi in prodi_codes:
-                expected_code = prodi_codes[prodi]
-                if nim_prodi_code != expected_code:
-                    QMessageBox.warning(self, "Invalid Input", f"NIM tidak sesuai Prodi! Untuk '{prodi}' kode tengah NIM harus '{expected_code}'.")
-                    return
+            if nim_prodi_code == "01" and prodi.lower() != "sistem informasi":
+                QMessageBox.warning(self, "Invalid Input", "Prodi invalid! Kode NIM '01' hanya untuk Prodi 'Sistem Informasi'")
+                return
 
             if not self.sel_id:
                 if db.query(Mahasiswa).filter_by(nim=nim).first():
@@ -615,13 +599,11 @@ class MahasiswaWidget(QWidget):
             db.close()
 
     def delete(self):
-        if self.sel_id and QMessageBox.question(self, "Hapus", "Yakin? Semua data NILAI mahasiswa ini juga akan dihapus permanen.", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+        if self.sel_id and QMessageBox.question(self, "Hapus", "Yakin?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             db = SessionLocal()
             try:
                 m = db.query(Mahasiswa).get(self.sel_id)
                 if m:
-                    db.query(Nilai).filter(Nilai.mahasiswa_id == self.sel_id).delete()
-                    
                     log_activity(self.username, "DELETE", "Mahasiswa", f"Hapus Mhs: {m.nim} - {m.nama}")
                     db.delete(m)
                     db.commit()
@@ -629,7 +611,6 @@ class MahasiswaWidget(QWidget):
                     self.reset()
                     self.data_changed.emit()
             except Exception as e:
-                db.rollback()
                 QMessageBox.critical(self, "Error", str(e))
             finally:
                 db.close()
@@ -1934,14 +1915,14 @@ class MainWidget(QWidget):
         cards.addWidget(card("⚠️", self.lbl_kritis, "IPK < 2.0 (KRITIS)", "#FFFFFF", "#EF4444"))
         l.addLayout(cards)
 
-        r1 = QHBoxLayout()
         self.chart_trend = self.create_chart_container("Tren Pertumbuhan Mahasiswa")
-        self.chart_status = self.create_chart_container("Distribusi Status Mahasiswa")
-        r1.addWidget(self.chart_trend); r1.addWidget(self.chart_status)
-        l.addLayout(r1)
+        l.addWidget(self.chart_trend)
 
         self.chart_ipk_trend = self.create_chart_container("Tren Rata-rata IPK per Angkatan")
         l.addWidget(self.chart_ipk_trend)
+
+        self.chart_status = self.create_chart_container("Distribusi Status Mahasiswa")
+        l.addWidget(self.chart_status)
 
         l.addStretch()
         scroll.setWidget(content)
@@ -2079,8 +2060,16 @@ class MainWidget(QWidget):
 
             theme = ThemeColors(self.is_dark).CHART_THEME
             
-            series = QLineSeries(); series.setName("Mahasiswa Aktif"); series.setPointsVisible(True); series.setMarkerSize(6.0)
+            series = QLineSeries(); series.setName("Mahasiswa Aktif"); series.setPointsVisible(True); series.setMarkerSize(5.0)
             pen = series.pen(); pen.setWidth(3); pen.setColor(QColor("#3498DB")); series.setPen(pen); series.setColor(QColor("#3498DB"))
+            
+            scat_trend = QScatterSeries()
+            scat_trend.setMarkerSize(1.0)
+            scat_trend.setColor(Qt.transparent)
+            scat_trend.setPointLabelsVisible(True)
+            scat_trend.setPointLabelsFormat("@yPoint")
+            if self.is_dark: scat_trend.setPointLabelsColor(QColor("#F1F5F9"))
+
             trend_data = db.query(Mahasiswa.tahun_masuk, func.count(Mahasiswa.id)).group_by(Mahasiswa.tahun_masuk).order_by(Mahasiswa.tahun_masuk).all()
             min_y, max_y, max_c = 0, 0, 0
             if trend_data:
@@ -2089,43 +2078,39 @@ class MainWidget(QWidget):
                 if years:
                     min_y, max_y = min(years), max(years); max_c = max(counts)
                     for y, c in trend_data:
-                        if y is not None: series.append(y, c)
+                        if y is not None: 
+                            series.append(y, c)
+                            scat_trend.append(y, c)
             else: curr_y = datetime.now().year; min_y, max_y = curr_y - 1, curr_y; max_c = 5
 
-            ch = QChart(); ch.addSeries(series); ch.setTitle("Tren Mahasiswa")
+            ch = QChart()
+            ch.addSeries(series)
+            ch.addSeries(scat_trend)
+            ch.setTitle("Tren Mahasiswa")
             ch.setTheme(theme); ch.setBackgroundBrush(Qt.NoBrush); ch.legend().setVisible(False)
             if self.is_dark: ch.setTitleBrush(QColor("#F1F5F9"))
             
-            axis_x = QValueAxis(); axis_x.setLabelFormat("%.0f"); axis_x.setRange(min_y, max_y)
-            axis_x.setTickCount(int(max_y-min_y)+1 if (max_y-min_y)<10 else 5)
+            axis_x = QValueAxis()
+            axis_x.setLabelFormat("%.0f")
+            start_x = min_y - 1
+            end_x = max_y + 1
+            axis_x.setRange(start_x, end_x)
+            span_x = end_x - start_x
+            axis_x.setTickCount(int(span_x)+1 if span_x < 12 else 6)
             if self.is_dark: axis_x.setLabelsColor(QColor("#F1F5F9"))
-            ch.addAxis(axis_x, Qt.AlignBottom); series.attachAxis(axis_x)
+            ch.addAxis(axis_x, Qt.AlignBottom)
+            series.attachAxis(axis_x)
+            scat_trend.attachAxis(axis_x)
             
             axis_y = QValueAxis(); axis_y.setRange(0, max_c + 5); axis_y.setLabelFormat("%.0f")
             if self.is_dark: axis_y.setLabelsColor(QColor("#F1F5F9"))
-            ch.addAxis(axis_y, Qt.AlignLeft); series.attachAxis(axis_y)
+            ch.addAxis(axis_y, Qt.AlignLeft)
+            series.attachAxis(axis_y)
+            scat_trend.attachAxis(axis_y)
             
             cv = QChartView(ch); cv.setRenderHint(QPainter.Antialiasing)
             if self.chart_trend.layout().count(): self.chart_trend.layout().itemAt(0).widget().setParent(None)
             self.chart_trend.layout().addWidget(cv)
-
-            series_s = QPieSeries(); series_s.setHoleSize(0.40)
-            stat_data = db.query(Mahasiswa.status, func.count(Mahasiswa.id)).group_by(Mahasiswa.status).all()
-            col_map = {"Aktif": "#10B981", "Cuti": "#F59E0B", "Lulus": "#3B82F6", "DO": "#EF4444"}
-            tot_stat = sum([c for _, c in stat_data])
-            for st, cnt in stat_data:
-                sl = series_s.append(f"{st}: {cnt}", cnt)
-                if st in col_map: sl.setColor(QColor(col_map[st]))
-                else: sl.setColor(QColor("#94A3B8"))
-                sl.setLabelVisible(True)
-                if self.is_dark: sl.setLabelColor(QColor("#F1F5F9"))
-            ch_s = QChart(); ch_s.addSeries(series_s); ch_s.setTitle("Distribusi Status")
-            ch_s.legend().setVisible(True); ch_s.legend().setAlignment(Qt.AlignRight)
-            ch_s.setTheme(theme); ch_s.setBackgroundBrush(Qt.NoBrush)
-            if self.is_dark: ch_s.setTitleBrush(QColor("#F1F5F9")); ch_s.legend().setLabelColor(QColor("#F1F5F9"))
-            cv_s = QChartView(ch_s); cv_s.setRenderHint(QPainter.Antialiasing)
-            if self.chart_status.layout().count(): self.chart_status.layout().itemAt(0).widget().setParent(None)
-            self.chart_status.layout().addWidget(cv_s)
 
             gpa_trend_data = defaultdict(list)
             all_mhs = db.query(Mahasiswa).all()
@@ -2164,6 +2149,24 @@ class MainWidget(QWidget):
             if self.chart_ipk_trend.layout().count(): self.chart_ipk_trend.layout().itemAt(0).widget().setParent(None)
             self.chart_ipk_trend.layout().addWidget(cv_ipk)
 
+            series_s = QPieSeries(); series_s.setHoleSize(0.40)
+            stat_data = db.query(Mahasiswa.status, func.count(Mahasiswa.id)).group_by(Mahasiswa.status).all()
+            col_map = {"Aktif": "#10B981", "Cuti": "#F59E0B", "Lulus": "#3B82F6", "DO": "#EF4444"}
+            tot_stat = sum([c for _, c in stat_data])
+            for st, cnt in stat_data:
+                sl = series_s.append(f"{st}: {cnt}", cnt)
+                if st in col_map: sl.setColor(QColor(col_map[st]))
+                else: sl.setColor(QColor("#94A3B8"))
+                sl.setLabelVisible(True)
+                if self.is_dark: sl.setLabelColor(QColor("#F1F5F9"))
+            ch_s = QChart(); ch_s.addSeries(series_s); ch_s.setTitle("Distribusi Status")
+            ch_s.legend().setVisible(True); ch_s.legend().setAlignment(Qt.AlignRight)
+            ch_s.setTheme(theme); ch_s.setBackgroundBrush(Qt.NoBrush)
+            if self.is_dark: ch_s.setTitleBrush(QColor("#F1F5F9")); ch_s.legend().setLabelColor(QColor("#F1F5F9"))
+            cv_s = QChartView(ch_s); cv_s.setRenderHint(QPainter.Antialiasing)
+            if self.chart_status.layout().count(): self.chart_status.layout().itemAt(0).widget().setParent(None)
+            self.chart_status.layout().addWidget(cv_s)
+
             series_d = QBarSeries(); series_d.setLabelsVisible(True); series_d.setLabelsFormat("@value")
             set_d = QBarSet("Mahasiswa"); set_d.setColor(QColor("#9B59B6"))
             buckets = [0, 0, 0, 0] 
@@ -2174,15 +2177,25 @@ class MainWidget(QWidget):
                 else: buckets[3] += 1
             for b in buckets: set_d.append(b)
             series_d.append(set_d)
+            
             ch_d = QChart(); ch_d.addSeries(series_d); ch_d.setTitle("Sebaran IPK")
-            ax_d = QBarCategoryAxis(); ax_d.append(["< 2.00", "2.00-2.75", "2.76-3.50", "> 3.50"]) 
+            
+            cats_d = ["&lt; 2.00", "2.00-2.75", "2.76-3.50", "&gt; 3.50"]
+            ax_d = QBarCategoryAxis()
+            ax_d.append(cats_d)
             if self.is_dark: ax_d.setLabelsColor(QColor("#F1F5F9"))
-            ch_d.addAxis(ax_d, Qt.AlignBottom); series_d.attachAxis(ax_d)
-            ay_d = QValueAxis(); ay_d.setRange(0, max(buckets)+2 if buckets else 5)
+            ch_d.addAxis(ax_d, Qt.AlignBottom)
+            series_d.attachAxis(ax_d)
+            
+            ay_d = QValueAxis()
+            ay_d.setRange(0, max(buckets)+2 if buckets else 5)
             if self.is_dark: ay_d.setLabelsColor(QColor("#F1F5F9"))
-            ch_d.addAxis(ay_d, Qt.AlignLeft); series_d.attachAxis(ay_d)
+            ch_d.addAxis(ay_d, Qt.AlignLeft)
+            series_d.attachAxis(ay_d)
+            
             ch_d.setTheme(theme); ch_d.setBackgroundBrush(Qt.NoBrush); ch_d.legend().setVisible(False)
             if self.is_dark: ch_d.setTitleBrush(QColor("#F1F5F9"))
+            
             cv_d = QChartView(ch_d); cv_d.setRenderHint(QPainter.Antialiasing)
             if self.chart_dist.layout().count(): self.chart_dist.layout().itemAt(0).widget().setParent(None)
             self.chart_dist.layout().addWidget(cv_d)
