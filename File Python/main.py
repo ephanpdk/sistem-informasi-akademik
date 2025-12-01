@@ -313,9 +313,17 @@ class MahasiswaWidget(QWidget):
         f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
         self.i_nim = QLineEdit(); self.i_nim.setPlaceholderText("NIM")
         self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama Lengkap")
-        self.i_prodi = QLineEdit()
+        
+        self.i_prodi = QComboBox()
+        self.i_prodi.addItems(["Sistem Informasi", "Informatika", "Manajemen", "DKV"])
+        
         self.i_gen = QComboBox(); self.i_gen.addItems(["L", "P"])
-        self.i_thn = QLineEdit(); self.i_thn.setValidator(QIntValidator(2000,2100))
+        
+        self.i_thn = QComboBox()
+        current_year = datetime.now().year
+        for y in range(current_year - 10, current_year + 5):
+            self.i_thn.addItem(str(y))
+            
         self.i_tgl = QDateEdit(); self.i_tgl.setCalendarPopup(True); self.i_tgl.setDisplayFormat("dd/MM/yyyy")
         self.i_stat = QComboBox(); self.i_stat.addItems(["Aktif", "Lulus", "Cuti", "DO"])
         
@@ -460,9 +468,9 @@ class MahasiswaWidget(QWidget):
         self.sel_id = int(self.table.item(r,0).text())
         self.i_nim.setText(self.table.item(r,1).text())
         self.i_nama.setText(self.table.item(r,2).text())
-        self.i_prodi.setText(self.table.item(r,3).text())
+        self.i_prodi.setCurrentText(self.table.item(r,3).text())
         self.i_gen.setCurrentText(self.table.item(r,4).text())
-        self.i_thn.setText(self.table.item(r,5).text())
+        self.i_thn.setCurrentText(self.table.item(r,5).text())
         tgl = self.table.item(r,6).text()
         if tgl != "-": self.i_tgl.setDate(QDate.fromString(tgl, "dd/MM/yyyy"))
         self.i_stat.setCurrentText(self.table.item(r,7).text())
@@ -474,7 +482,10 @@ class MahasiswaWidget(QWidget):
 
     def reset(self):
         self.sel_id = None
-        self.i_nim.clear(); self.i_nama.clear(); self.i_prodi.clear(); self.i_thn.clear()
+        self.i_nim.clear()
+        self.i_nama.clear()
+        self.i_prodi.setCurrentIndex(0)
+        self.i_thn.setCurrentIndex(0)
         self.i_doswal.setCurrentIndex(0)
 
     def save(self):
@@ -482,7 +493,34 @@ class MahasiswaWidget(QWidget):
         try:
             nim = self.i_nim.text()
             nama = self.i_nama.text()
+            prodi = self.i_prodi.currentText()
+            angkatan_str = self.i_thn.currentText()
             
+            if not nim or len(nim) < 4:
+                QMessageBox.warning(self, "Invalid Input", "NIM minimal 4 digit.")
+                return
+            
+            nim_prefix = nim[:2]
+            angkatan_suffix = angkatan_str[-2:]
+            
+            if nim_prefix != angkatan_suffix:
+                QMessageBox.warning(self, "Invalid Input", f"Angkatan invalid! NIM diawali '{nim_prefix}', maka Angkatan harus '20{nim_prefix}'")
+                return
+
+            nim_prodi_code = nim[2:4]
+            prodi_codes = {
+                "Sistem Informasi": "01",
+                "Informatika": "02",
+                "Manajemen": "03",
+                "DKV": "04"
+            }
+            
+            if prodi in prodi_codes:
+                expected_code = prodi_codes[prodi]
+                if nim_prodi_code != expected_code:
+                    QMessageBox.warning(self, "Invalid Input", f"NIM tidak sesuai Prodi! Untuk '{prodi}' kode tengah NIM harus '{expected_code}'.")
+                    return
+
             if not self.sel_id:
                 if db.query(Mahasiswa).filter_by(nim=nim).first():
                     QMessageBox.warning(self, "Error", "NIM sudah terdaftar")
@@ -494,8 +532,8 @@ class MahasiswaWidget(QWidget):
                     if found >= 0: doswal_id = self.i_doswal.itemData(found)
                 
                 new_mhs = Mahasiswa(
-                    nim=nim, nama=nama, program_studi=self.i_prodi.text(),
-                    gender=self.i_gen.currentText(), tahun_masuk=int(self.i_thn.text()),
+                    nim=nim, nama=nama, program_studi=prodi,
+                    gender=self.i_gen.currentText(), tahun_masuk=int(angkatan_str),
                     tanggal_lahir=self.i_tgl.date().toPython(), status=self.i_stat.currentText(),
                     dosen_wali_id=doswal_id
                 )
@@ -503,13 +541,18 @@ class MahasiswaWidget(QWidget):
                 log_activity(self.username, "CREATE", "Mahasiswa", f"Tambah Mhs: {nim} - {nama}")
                 QMessageBox.information(self, "Sukses", "Data Berhasil Ditambahkan")
             else:
+                existing_mhs = db.query(Mahasiswa).filter_by(nim=nim).first()
+                if existing_mhs and existing_mhs.id != self.sel_id:
+                    QMessageBox.warning(self, "Error", "NIM sudah digunakan mahasiswa lain")
+                    return
+
                 m = db.query(Mahasiswa).get(self.sel_id)
                 if m:
                     m.nim = nim
                     m.nama = nama
-                    m.program_studi = self.i_prodi.text()
+                    m.program_studi = prodi
                     m.gender = self.i_gen.currentText()
-                    m.tahun_masuk = int(self.i_thn.text())
+                    m.tahun_masuk = int(angkatan_str)
                     m.tanggal_lahir = self.i_tgl.date().toPython()
                     m.status = self.i_stat.currentText()
                     
@@ -572,11 +615,13 @@ class MahasiswaWidget(QWidget):
             db.close()
 
     def delete(self):
-        if self.sel_id and QMessageBox.question(self, "Hapus", "Yakin?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+        if self.sel_id and QMessageBox.question(self, "Hapus", "Yakin? Semua data NILAI mahasiswa ini juga akan dihapus permanen.", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
             db = SessionLocal()
             try:
                 m = db.query(Mahasiswa).get(self.sel_id)
                 if m:
+                    db.query(Nilai).filter(Nilai.mahasiswa_id == self.sel_id).delete()
+                    
                     log_activity(self.username, "DELETE", "Mahasiswa", f"Hapus Mhs: {m.nim} - {m.nama}")
                     db.delete(m)
                     db.commit()
@@ -584,6 +629,7 @@ class MahasiswaWidget(QWidget):
                     self.reset()
                     self.data_changed.emit()
             except Exception as e:
+                db.rollback()
                 QMessageBox.critical(self, "Error", str(e))
             finally:
                 db.close()
@@ -693,7 +739,7 @@ class MahasiswaWidget(QWidget):
             log_activity(self.username, "EXPORT", "Mahasiswa", "Export data mahasiswa ke Excel")
             QMessageBox.information(self, "Sukses", f"Data berhasil diekspor ke:\n{path}")
         except Exception as e: QMessageBox.critical(self, "Error", str(e))
-        
+
 class DosenWidget(QWidget):
     data_changed = Signal()
     JABATAN_LIST = ["Asisten Ahli", "Lektor", "Lektor Kepala", "Profesor"]
@@ -1632,41 +1678,114 @@ class PenggunaWidget(QWidget):
             self.input_username.setReadOnly(False)
 
 class AuditLogWidget(QWidget):
-    def __init__(self):
+    def __init__(self, username, role):
         super().__init__()
+        self.username = username
+        self.role = role
         self.initUI()
         self.load_data()
 
     def initUI(self):
-        layout = QVBoxLayout(self); layout.setContentsMargins(20,20,20,20)
-        card = QFrame(); card.setObjectName("table_frame"); add_shadow(card)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        card = QFrame()
+        card.setObjectName("table_frame")
+        add_shadow(card)
+        
         l = QVBoxLayout(card)
         
         hl = QHBoxLayout()
         hl.addWidget(QLabel("📜 Log Aktivitas", styleSheet="font-size:18px; font-weight:bold"))
-        btn = QPushButton("Refresh"); btn.setObjectName("btn_simpan"); btn.clicked.connect(self.load_data)
-        hl.addStretch(); hl.addWidget(btn)
+        
+        btn_refresh = QPushButton("Refresh")
+        btn_refresh.setObjectName("btn_export")
+        btn_refresh.clicked.connect(self.load_data)
+        
+        hl.addStretch()
+        hl.addWidget(btn_refresh)
+
+        if self.role == "Admin Manajemen":
+            btn_del_sel = QPushButton("Hapus Baris")
+            btn_del_sel.setObjectName("btn_hapus")
+            btn_del_sel.clicked.connect(self.delete_selected)
+            hl.addWidget(btn_del_sel)
+
+            btn_clear = QPushButton("Hapus Semua")
+            btn_clear.setObjectName("btn_hapus")
+            btn_clear.clicked.connect(self.clear_all_logs)
+            hl.addWidget(btn_clear)
+
         l.addLayout(hl)
         
-        self.table = QTableWidget(); self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Waktu", "User", "Aksi", "Tabel", "Detail"])
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["ID", "Waktu", "User", "Aksi", "Detail"])
+        self.table.setColumnHidden(0, True)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         l.addWidget(self.table)
+        
         layout.addWidget(card)
 
     def load_data(self):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
-        self.table.setRowCount(0)
-        for i, lg in enumerate(db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(50).all()):
-            self.table.insertRow(i)
-            self.table.setItem(i,0,QTableWidgetItem(lg.timestamp.strftime("%d/%m %H:%M")))
-            self.table.setItem(i,1,QTableWidgetItem(lg.username))
-            self.table.setItem(i,2,QTableWidgetItem(lg.action))
-            self.table.setItem(i,3,QTableWidgetItem(lg.table_name))
-            self.table.setItem(i,4,QTableWidgetItem(lg.details))
-        db.close()
+        try:
+            self.table.setRowCount(0)
+            logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
+            for i, lg in enumerate(logs):
+                self.table.insertRow(i)
+                self.table.setItem(i, 0, QTableWidgetItem(str(lg.id)))
+                self.table.setItem(i, 1, QTableWidgetItem(lg.timestamp.strftime("%d/%m %H:%M")))
+                self.table.setItem(i, 2, QTableWidgetItem(lg.username))
+                self.table.setItem(i, 3, QTableWidgetItem(f"{lg.action} - {lg.table_name}"))
+                self.table.setItem(i, 4, QTableWidgetItem(lg.details))
+        finally:
+            db.close()
+
+    def delete_selected(self):
+        rows = sorted(set(index.row() for index in self.table.selectedIndexes()), reverse=True)
+        if not rows:
+            QMessageBox.warning(self, "Peringatan", "Pilih baris yang akan dihapus")
+            return
+
+        if QMessageBox.question(self, "Konfirmasi", f"Hapus {len(rows)} baris log?", QMessageBox.Yes | QMessageBox.No) == QMessageBox.No:
+            return
+
+        db = SessionLocal()
+        try:
+            for r in rows:
+                log_id = int(self.table.item(r, 0).text())
+                obj = db.query(AuditLog).get(log_id)
+                if obj:
+                    db.delete(obj)
+            db.commit()
+            log_activity(self.username, "DELETE", "AuditLog", f"Menghapus {len(rows)} baris log")
+            self.load_data()
+            QMessageBox.information(self, "Sukses", "Log terpilih berhasil dihapus")
+        except Exception as e:
+            db.rollback()
+            QMessageBox.critical(self, "Error", str(e))
+        finally:
+            db.close()
+
+    def clear_all_logs(self):
+        if QMessageBox.question(self, "Konfirmasi", "Yakin ingin menghapus SELURUH riwayat log?", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+            db = SessionLocal()
+            try:
+                db.query(AuditLog).delete()
+                db.commit()
+                log_activity(self.username, "DELETE", "AuditLog", "Menghapus seluruh history log")
+                self.load_data()
+                QMessageBox.information(self, "Sukses", "Seluruh log berhasil dihapus")
+            except Exception as e:
+                db.rollback()
+                QMessageBox.critical(self, "Error", str(e))
+            finally:
+                db.close()
 
 class MainWidget(QWidget):
     logout_signal = Signal()
@@ -1685,7 +1804,7 @@ class MainWidget(QWidget):
         self.dosen_page = DosenWidget(username)
         self.mk_page = MatakuliahWidget(username)
         self.nilai_page = NilaiWidget(username)
-        self.audit_page = AuditLogWidget()
+        self.audit_page = AuditLogWidget(username, role)
         self.user_page = PenggunaWidget(username)
         
         self.stack.addWidget(self.dashboard)
@@ -1705,7 +1824,7 @@ class MainWidget(QWidget):
         layout.addWidget(self.nav)
         layout.addWidget(self.stack)
 
-        self.update_dashboard_stats() 
+        self.update_dashboard_stats()
 
     def create_nav(self):
         f = QFrame(); f.setObjectName("nav_frame")
