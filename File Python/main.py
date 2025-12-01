@@ -192,11 +192,18 @@ def log_activity(username, action, table, details):
     if 'SessionLocal' not in globals() or SessionLocal is None: return
     db = SessionLocal()
     try:
-        log = AuditLog(username=username, action=action, table_name=table, details=details)
+        log = AuditLog(
+            username=username, 
+            action=action, 
+            table_name=table, 
+            details=details,
+            timestamp=datetime.now()
+        )
         db.add(log)
         db.commit()
     except Exception as e:
         db.rollback()
+        print(f"Gagal mencatat log: {e}")
     finally:
         db.close()
 
@@ -311,11 +318,17 @@ class MahasiswaWidget(QWidget):
         fl.addWidget(QLabel("📝 Data Mahasiswa", styleSheet="font-size:18px; font-weight:bold; border:none;"))
         
         f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
-        self.i_nim = QLineEdit(); self.i_nim.setPlaceholderText("NIM")
+        self.i_nim = QLineEdit(); self.i_nim.setPlaceholderText("NIM (Cth: 2401...)")
         self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama Lengkap")
-        self.i_prodi = QLineEdit()
+        
+        self.i_prodi = QComboBox()
+        self.i_prodi.addItems(["Sistem Informasi", "Informatika", "Manajemen", "DKV"])
+        
         self.i_gen = QComboBox(); self.i_gen.addItems(["L", "P"])
-        self.i_thn = QLineEdit(); self.i_thn.setValidator(QIntValidator(2000,2100))
+        
+        self.i_thn = QComboBox()
+        self.i_thn.addItems([str(y) for y in range(2018, 2030)])
+
         self.i_tgl = QDateEdit(); self.i_tgl.setCalendarPopup(True); self.i_tgl.setDisplayFormat("dd/MM/yyyy")
         self.i_stat = QComboBox(); self.i_stat.addItems(["Aktif", "Lulus", "Cuti", "DO"])
         
@@ -460,9 +473,13 @@ class MahasiswaWidget(QWidget):
         self.sel_id = int(self.table.item(r,0).text())
         self.i_nim.setText(self.table.item(r,1).text())
         self.i_nama.setText(self.table.item(r,2).text())
-        self.i_prodi.setText(self.table.item(r,3).text())
+        
+        self.i_prodi.setCurrentText(self.table.item(r,3).text())
+        
         self.i_gen.setCurrentText(self.table.item(r,4).text())
-        self.i_thn.setText(self.table.item(r,5).text())
+        
+        self.i_thn.setCurrentText(self.table.item(r,5).text())
+        
         tgl = self.table.item(r,6).text()
         if tgl != "-": self.i_tgl.setDate(QDate.fromString(tgl, "dd/MM/yyyy"))
         self.i_stat.setCurrentText(self.table.item(r,7).text())
@@ -474,7 +491,11 @@ class MahasiswaWidget(QWidget):
 
     def reset(self):
         self.sel_id = None
-        self.i_nim.clear(); self.i_nama.clear(); self.i_prodi.clear(); self.i_thn.clear()
+        self.i_nim.clear(); self.i_nama.clear()
+        
+        self.i_prodi.setCurrentIndex(0)
+        self.i_thn.setCurrentIndex(0)
+        
         self.i_doswal.setCurrentIndex(0)
 
     def save(self):
@@ -482,8 +503,9 @@ class MahasiswaWidget(QWidget):
         try:
             nim = self.i_nim.text()
             nama = self.i_nama.text()
-            angkatan_str = self.i_thn.text()
-            prodi = self.i_prodi.text()
+            
+            angkatan_str = self.i_thn.currentText()
+            prodi = self.i_prodi.currentText()
             
             if not nim or len(nim) < 4:
                 QMessageBox.warning(self, "Invalid Input", "NIM minimal 4 digit.")
@@ -493,16 +515,26 @@ class MahasiswaWidget(QWidget):
                 QMessageBox.warning(self, "Invalid Input", "Angkatan harus diisi.")
                 return
 
-            nim_prefix = nim[:2]
-            angkatan_suffix = angkatan_str[-2:]
-            
-            if nim_prefix != angkatan_suffix:
-                QMessageBox.warning(self, "Invalid Input", f"Angkatan invalid! NIM diawali '{nim_prefix}', maka Angkatan harus '20{nim_prefix}'")
+            nim_year_prefix = nim[:2]
+            if not angkatan_str.endswith(nim_year_prefix):
+                QMessageBox.warning(self, "Invalid Input", f"NIM diawali '{nim_year_prefix}', maka Angkatan harus '20{nim_year_prefix}'")
                 return
 
             nim_prodi_code = nim[2:4]
-            if nim_prodi_code == "01" and prodi.lower() != "sistem informasi":
-                QMessageBox.warning(self, "Invalid Input", "Prodi invalid! Kode NIM '01' hanya untuk Prodi 'Sistem Informasi'")
+            prodi_map = {
+                "01": "Sistem Informasi",
+                "02": "Informatika",
+                "03": "Manajemen",
+                "04": "DKV"
+            }
+
+            if nim_prodi_code in prodi_map:
+                expected_prodi = prodi_map[nim_prodi_code]
+                if prodi != expected_prodi:
+                    QMessageBox.warning(self, "Invalid Input", f"Kode NIM '{nim_prodi_code}' adalah untuk Prodi '{expected_prodi}'.")
+                    return
+            else:
+                QMessageBox.warning(self, "Invalid Input", f"Kode Prodi '{nim_prodi_code}' pada NIM tidak dikenali (Harus 01, 02, 03, atau 04).")
                 return
 
             if not self.sel_id:
@@ -728,6 +760,7 @@ class DosenWidget(QWidget):
     def __init__(self, username):
         super().__init__()
         self.username = username
+        self.selected_id = None
         self.initUI()
         self.load_data()
 
@@ -736,39 +769,172 @@ class DosenWidget(QWidget):
         super().showEvent(event)
 
     def initUI(self):
-        layout = QVBoxLayout(self); layout.setContentsMargins(20,20,20,20)
-        card = QFrame(); card.setObjectName("table_frame"); add_shadow(card)
-        l = QVBoxLayout(card)
+        layout = QHBoxLayout(self); layout.setContentsMargins(20,20,20,20); layout.setSpacing(20)
+        
+        self.form_card = QFrame(); self.form_card.setObjectName("form_frame"); self.form_card.setFixedWidth(320)
+        add_shadow(self.form_card)
+        fl = QVBoxLayout(self.form_card); fl.setContentsMargins(20,20,20,20); fl.setSpacing(15)
+        fl.addWidget(QLabel("👨‍🏫 Data Dosen", styleSheet="font-size:18px; font-weight:bold; border:none;"))
+        
+        f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
+        self.i_nidn = QLineEdit(); self.i_nidn.setPlaceholderText("NIDN")
+        self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama Lengkap")
+        self.i_email = QLineEdit(); self.i_email.setPlaceholderText("Email")
+        
+        self.i_gen = QComboBox(); self.i_gen.addItems(["L", "P"])
+        self.i_jabatan = QComboBox(); self.i_jabatan.addItems(self.JABATAN_LIST)
+        
+        f_grid.addRow("NIDN", self.i_nidn)
+        f_grid.addRow("Nama", self.i_nama)
+        f_grid.addRow("Gender", self.i_gen)
+        f_grid.addRow("Jabatan", self.i_jabatan)
+        f_grid.addRow("Email", self.i_email)
+        
+        fl.addLayout(f_grid); fl.addStretch()
+        
+        bh = QHBoxLayout()
+        b_simpan = QPushButton("Simpan"); b_simpan.setObjectName("btn_simpan"); b_simpan.clicked.connect(self.save)
+        b_hapus = QPushButton("Hapus"); b_hapus.setObjectName("btn_hapus"); b_hapus.clicked.connect(self.delete)
+        bh.addWidget(b_simpan); bh.addWidget(b_hapus)
+        fl.addLayout(bh)
+        
+        b_rst = QPushButton("Reset"); b_rst.setObjectName("btn_bersihkan"); b_rst.clicked.connect(self.reset)
+        fl.addWidget(b_rst)
+        self.form_card.setEnabled(True)
+
+        self.table_card = QFrame(); self.table_card.setObjectName("table_frame")
+        add_shadow(self.table_card)
+        tl = QVBoxLayout(self.table_card); tl.setContentsMargins(20,20,20,20)
         
         th = QHBoxLayout()
-        th.addWidget(QLabel("👨‍🏫 Data Dosen", styleSheet="font-size:18px; font-weight:bold"))
-        th.addStretch()
+        self.search = QLineEdit(); self.search.setPlaceholderText("🔍 Cari Dosen...")
+        self.search.textChanged.connect(self.filter)
+        
+        self.f_jabatan = QComboBox()
+        self.f_jabatan.addItem("Semua Jabatan")
+        self.f_jabatan.addItems(self.JABATAN_LIST)
+        self.f_jabatan.currentTextChanged.connect(self.filter)
         
         b_imp = QPushButton("Import Excel"); b_imp.setObjectName("btn_export"); b_imp.clicked.connect(self.import_xls)
         b_exp = QPushButton("Export Excel"); b_exp.setObjectName("btn_export"); b_exp.clicked.connect(self.export_xls)
         
-        th.addWidget(b_imp); th.addWidget(b_exp)
-        l.addLayout(th)
+        th.addWidget(self.search, 2)
+        th.addWidget(self.f_jabatan, 1)
+        th.addWidget(b_imp)
+        th.addWidget(b_exp)
+        tl.addLayout(th)
         
-        self.table = QTableWidget(); self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["NIDN", "Nama", "Gender", "Jabatan", "Email"])
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table = QTableWidget(); self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["ID", "NIDN", "Nama", "Gender", "Jabatan", "Email"])
+        self.table.setColumnHidden(0, True)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.setAlternatingRowColors(True)
-        l.addWidget(self.table)
-        layout.addWidget(card)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.itemClicked.connect(self.row_click)
+        tl.addWidget(self.table)
+        
+        layout.addWidget(self.form_card); layout.addWidget(self.table_card)
 
     def load_data(self):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
-        self.table.setRowCount(0)
-        for i, d in enumerate(db.query(Dosen).all()):
-            self.table.insertRow(i)
-            self.table.setItem(i,0,QTableWidgetItem(d.nidn))
-            self.table.setItem(i,1,QTableWidgetItem(d.nama))
-            self.table.setItem(i,2,QTableWidgetItem(d.gender))
-            self.table.setItem(i,3,QTableWidgetItem(d.jabatan_akademik))
-            self.table.setItem(i,4,QTableWidgetItem(d.email))
-        db.close()
+        try:
+            self.table.setRowCount(0)
+            for i, d in enumerate(db.query(Dosen).all()):
+                self.table.insertRow(i)
+                self.table.setItem(i,0,QTableWidgetItem(str(d.id)))
+                self.table.setItem(i,1,QTableWidgetItem(d.nidn))
+                self.table.setItem(i,2,QTableWidgetItem(d.nama))
+                self.table.setItem(i,3,QTableWidgetItem(d.gender))
+                self.table.setItem(i,4,QTableWidgetItem(d.jabatan_akademik))
+                self.table.setItem(i,5,QTableWidgetItem(d.email))
+        finally: db.close()
+
+    def row_click(self, item):
+        r = item.row()
+        self.selected_id = int(self.table.item(r,0).text())
+        self.i_nidn.setText(self.table.item(r,1).text())
+        self.i_nama.setText(self.table.item(r,2).text())
+        self.i_gen.setCurrentText(self.table.item(r,3).text())
+        self.i_jabatan.setCurrentText(self.table.item(r,4).text())
+        self.i_email.setText(self.table.item(r,5).text())
+
+    def reset(self):
+        self.selected_id = None
+        self.i_nidn.clear(); self.i_nama.clear(); self.i_email.clear()
+        self.i_gen.setCurrentIndex(0)
+        self.i_jabatan.setCurrentIndex(0)
+
+    def save(self):
+        db = SessionLocal()
+        try:
+            nidn = self.i_nidn.text()
+            nama = self.i_nama.text()
+            email = self.i_email.text()
+            gender = self.i_gen.currentText()
+            jabatan = self.i_jabatan.currentText()
+
+            if not all([nidn, nama, email]):
+                QMessageBox.warning(self, "Invalid Input", "Semua kolom harus diisi")
+                return
+
+            if not self.selected_id:
+                if db.query(Dosen).filter((Dosen.nidn==nidn) | (Dosen.email==email)).first():
+                    QMessageBox.warning(self, "Error", "NIDN atau Email sudah terdaftar")
+                    return
+                
+                db.add(Dosen(nidn=nidn, nama=nama, gender=gender, jabatan_akademik=jabatan, email=email))
+                log_activity(self.username, "CREATE", "Dosen", f"Tambah Dosen: {nidn} - {nama}")
+                QMessageBox.information(self, "Sukses", "Data Berhasil Ditambahkan")
+            else:
+                existing = db.query(Dosen).filter((Dosen.nidn==nidn) | (Dosen.email==email)).first()
+                if existing and existing.id != self.selected_id:
+                    QMessageBox.warning(self, "Error", "NIDN atau Email sudah digunakan dosen lain")
+                    return
+
+                d = db.query(Dosen).get(self.selected_id)
+                if d:
+                    d.nidn = nidn
+                    d.nama = nama
+                    d.gender = gender
+                    d.jabatan_akademik = jabatan
+                    d.email = email
+                    log_activity(self.username, "UPDATE", "Dosen", f"Update Dosen: {nidn} - {nama}")
+                    QMessageBox.information(self, "Sukses", "Data Berhasil Diupdate")
+
+            db.commit(); self.load_data(); self.reset()
+            self.data_changed.emit()
+        except Exception as e: 
+            db.rollback(); QMessageBox.critical(self, "Error", str(e))
+        finally: db.close()
+
+    def delete(self):
+        if self.selected_id and QMessageBox.question(self, "Hapus", "Yakin?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+            db = SessionLocal()
+            try:
+                d = db.query(Dosen).get(self.selected_id)
+                if d:
+                    log_activity(self.username, "DELETE", "Dosen", f"Hapus Dosen: {d.nidn}")
+                    db.delete(d)
+                    db.commit(); self.load_data(); self.reset()
+                    self.data_changed.emit()
+            except Exception as e: QMessageBox.critical(self, "Error", str(e))
+            finally: db.close()
+
+    def filter(self):
+        t = self.search.text().lower()
+        fj = self.f_jabatan.currentText()
+        
+        for r in range(self.table.rowCount()):
+            nidn = self.table.item(r,1).text().lower()
+            nama = self.table.item(r,2).text().lower()
+            jabatan = self.table.item(r,4).text()
+            
+            match_text = t in nidn or t in nama
+            match_jabatan = (fj == "Semua Jabatan" or fj == jabatan)
+            
+            self.table.setRowHidden(r, not (match_text and match_jabatan))
 
     def import_xls(self):
         path, _ = QFileDialog.getOpenFileName(self, "Pilih File Excel", "", "Excel Files (*.xlsx *.xls)")
@@ -787,16 +953,17 @@ class DosenWidget(QWidget):
             for _, r in df.iterrows():
                 nidn = r["NIDN"].strip()
                 email = r["Email"].strip()
-                jabatan = r["Jabatan"].strip()
-                gender = r["Gender"].strip()
                 
                 if db.query(Dosen).filter((Dosen.nidn==nidn)|(Dosen.email==email)).first():
                     skipped += 1; continue
                 
-                if jabatan not in self.JABATAN_LIST or gender not in ['L', 'P']:
-                    skipped += 1; continue
-                
-                db.add(Dosen(nidn=nidn, nama=r["Nama"].strip(), gender=gender, jabatan_akademik=jabatan, email=email))
+                db.add(Dosen(
+                    nidn=nidn, 
+                    nama=r["Nama"].strip(), 
+                    gender=r["Gender"].strip(), 
+                    jabatan_akademik=r["Jabatan"].strip(), 
+                    email=email
+                ))
                 added += 1
             
             if added > 0:
@@ -813,8 +980,15 @@ class DosenWidget(QWidget):
         data = []
         headers = ["NIDN", "Nama", "Gender", "Jabatan", "Email"]
         for r in range(self.table.rowCount()):
-            row = [self.table.item(r, c).text() if self.table.item(r, c) else "" for c in range(self.table.columnCount())]
-            data.append(row)
+            if not self.table.isRowHidden(r):
+                row = [
+                    self.table.item(r, 1).text(),
+                    self.table.item(r, 2).text(),
+                    self.table.item(r, 3).text(),
+                    self.table.item(r, 4).text(),
+                    self.table.item(r, 5).text()
+                ]
+                data.append(row)
         try:
             pd.DataFrame(data, columns=headers).to_excel(path, index=False)
             log_activity(self.username, "EXPORT", "Dosen", "Export data dosen ke Excel")
@@ -823,7 +997,7 @@ class DosenWidget(QWidget):
 
 class MatakuliahWidget(QWidget):
     data_changed = Signal()
-    PRODI_LIST = ["--Pilih Prodi--"]
+    PRODI_LIST = ["Sistem Informasi", "Informatika", "Manajemen", "DKV"]
     
     def __init__(self, username):
         super().__init__()
@@ -845,10 +1019,15 @@ class MatakuliahWidget(QWidget):
         fl.addWidget(QLabel("📚 Matakuliah", styleSheet="font-size:18px; font-weight:bold; border:none;"))
         
         f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
-        self.i_kode = QLineEdit(); self.i_kode.setPlaceholderText("Kode MK")
+        self.i_kode = QLineEdit(); self.i_kode.setPlaceholderText("Kode MK (Cth: INF101)")
         self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama MK")
-        self.i_sks = QLineEdit(); self.i_sks.setValidator(QIntValidator(1,9))
-        self.i_smt = QLineEdit(); self.i_smt.setValidator(QIntValidator(1,8))
+        
+        self.i_sks = QComboBox()
+        self.i_sks.addItems([str(i) for i in range(1, 7)])
+        
+        self.i_smt = QComboBox()
+        self.i_smt.addItems([str(i) for i in range(1, 9)])
+        
         self.i_prodi = QComboBox(); self.i_prodi.addItems(self.PRODI_LIST)
         
         f_grid.addRow("Kode", self.i_kode); f_grid.addRow("Nama", self.i_nama)
@@ -872,7 +1051,7 @@ class MatakuliahWidget(QWidget):
         self.search = QLineEdit(); self.search.setPlaceholderText("🔍 Cari MK...")
         self.search.textChanged.connect(self.filter)
         
-        self.f_prodi = QComboBox(); self.f_prodi.addItems(["Semua Prodi"] + self.PRODI_LIST[1:])
+        self.f_prodi = QComboBox(); self.f_prodi.addItems(["Semua Prodi"] + self.PRODI_LIST)
         self.f_prodi.currentTextChanged.connect(self.filter)
         
         self.f_smt = QComboBox(); self.f_smt.addItems(["Semua Smt"] + [str(i) for i in range(1,9)])
@@ -898,18 +1077,6 @@ class MatakuliahWidget(QWidget):
         if 'SessionLocal' not in globals() or SessionLocal is None: return
         db = SessionLocal()
         try:
-            prodis = db.query(Mahasiswa.program_studi).distinct().all()
-            if prodis:
-                self.PRODI_LIST = ["--Pilih Prodi--"] + sorted([p[0] for p in prodis if p[0]])
-            
-            self.i_prodi.clear(); self.i_prodi.addItems(self.PRODI_LIST)
-            
-            current_f_prodi = self.f_prodi.currentText()
-            self.f_prodi.blockSignals(True)
-            self.f_prodi.clear(); self.f_prodi.addItems(["Semua Prodi"] + self.PRODI_LIST[1:])
-            self.f_prodi.setCurrentText(current_f_prodi)
-            self.f_prodi.blockSignals(False)
-            
             self.table.setRowCount(0)
             for i, m in enumerate(db.query(Matakuliah).all()):
                 self.table.insertRow(i)
@@ -926,13 +1093,15 @@ class MatakuliahWidget(QWidget):
         self.selected_id = int(self.table.item(r,0).text())
         self.i_kode.setText(self.table.item(r,1).text())
         self.i_nama.setText(self.table.item(r,2).text())
-        self.i_sks.setText(self.table.item(r,3).text())
-        self.i_smt.setText(self.table.item(r,4).text())
+        self.i_sks.setCurrentText(self.table.item(r,3).text())
+        self.i_smt.setCurrentText(self.table.item(r,4).text())
         self.i_prodi.setCurrentText(self.table.item(r,5).text())
 
     def reset(self):
         self.selected_id = None
-        for w in [self.i_kode, self.i_nama, self.i_sks, self.i_smt]: w.clear()
+        self.i_kode.clear(); self.i_nama.clear()
+        self.i_sks.setCurrentIndex(0)
+        self.i_smt.setCurrentIndex(0)
         self.i_prodi.setCurrentIndex(0)
 
     def save(self):
@@ -940,7 +1109,43 @@ class MatakuliahWidget(QWidget):
         try:
             kode = self.i_kode.text()
             nama = self.i_nama.text()
+            sks = self.i_sks.currentText()
+            smt = self.i_smt.currentText()
+            prodi = self.i_prodi.currentText()
+
+            if not all([kode, nama, sks, smt, prodi]):
+                QMessageBox.warning(self, "Invalid Input", "Semua kolom harus diisi")
+                return
+
+            prefix_map = {
+                "Sistem Informasi": "SI",
+                "Informatika": "INF",
+                "Manajemen": "MNJ",
+                "DKV": "DKV"
+            }
+
+            expected_prefix = prefix_map.get(prodi)
+            if not kode.startswith(expected_prefix):
+                QMessageBox.warning(self, "Invalid Kode", f"Untuk Prodi {prodi}, Kode MK harus diawali '{expected_prefix}'")
+                return
+
+            prefix_len = len(expected_prefix)
+            expected_length = prefix_len + 3 
             
+            if len(kode) != expected_length:
+                QMessageBox.warning(self, "Invalid Kode", f"Format Kode Salah. Harus: {expected_prefix}[Semester][2 Digit Urut]. Contoh: {expected_prefix}101")
+                return
+
+            semester_digit = kode[prefix_len]
+            if semester_digit != smt:
+                QMessageBox.warning(self, "Invalid Kode", f"Digit setelah prefix harus sesuai semester. Input Semester: {smt}, Kode tertulis: {semester_digit}")
+                return
+
+            sequence_digits = kode[prefix_len+1:]
+            if not sequence_digits.isdigit():
+                QMessageBox.warning(self, "Invalid Kode", "2 digit terakhir harus berupa angka urutan.")
+                return
+
             if not self.selected_id:
                 if db.query(Matakuliah).filter_by(kode_mk=kode).first():
                     QMessageBox.warning(self, "Error", "Kode MK sudah ada")
@@ -948,19 +1153,24 @@ class MatakuliahWidget(QWidget):
                 
                 db.add(Matakuliah(
                     kode_mk=kode, nama_matakuliah=nama,
-                    sks=int(self.i_sks.text()), semester=int(self.i_smt.text()),
-                    program_studi=self.i_prodi.currentText()
+                    sks=int(sks), semester=int(smt),
+                    program_studi=prodi
                 ))
                 log_activity(self.username, "CREATE", "Matakuliah", f"Tambah MK: {kode} - {nama}")
                 QMessageBox.information(self, "Sukses", "Data Disimpan")
             else:
+                existing_mk = db.query(Matakuliah).filter_by(kode_mk=kode).first()
+                if existing_mk and existing_mk.id != self.selected_id:
+                    QMessageBox.warning(self, "Error", "Kode MK sudah digunakan")
+                    return
+
                 m = db.query(Matakuliah).get(self.selected_id)
                 if m:
                     m.kode_mk = kode
                     m.nama_matakuliah = nama
-                    m.sks = int(self.i_sks.text())
-                    m.semester = int(self.i_smt.text())
-                    m.program_studi = self.i_prodi.currentText()
+                    m.sks = int(sks)
+                    m.semester = int(smt)
+                    m.program_studi = prodi
                     log_activity(self.username, "UPDATE", "Matakuliah", f"Update MK: {kode} - {nama}")
                     QMessageBox.information(self, "Sukses", "Data Diupdate")
 
@@ -1101,10 +1311,11 @@ class NilaiWidget(QWidget):
         self.cb_mhs.setInsertPolicy(QComboBox.NoInsert)
         self.cb_mhs.completer().setCompletionMode(QCompleter.PopupCompletion)
         self.cb_mhs.completer().setFilterMode(Qt.MatchContains)
+        self.cb_mhs.lineEdit().setPlaceholderText("🔍 Cari Nama atau NIM Mahasiswa...")
         self.cb_mhs.activated.connect(self.mahasiswa_dipilih)
         
         self.lbl_ipk = QLabel("IPK: -", styleSheet="font-size:16px; font-weight:bold; color:#0EA5E9")
-        tl.addWidget(QLabel("Pilih Mahasiswa:")); tl.addWidget(self.cb_mhs, 2); tl.addStretch(); tl.addWidget(self.lbl_ipk)
+        tl.addWidget(self.cb_mhs, 2); tl.addStretch(); tl.addWidget(self.lbl_ipk)
         
         mid = QFrame(); mid.setObjectName("form_frame"); add_shadow(mid)
         ml = QHBoxLayout(mid)
@@ -1148,8 +1359,7 @@ class NilaiWidget(QWidget):
             self.mahasiswa_map = {}
             
             model = QStandardItemModel()
-            model.appendRow(QStandardItem("- Pilih Mahasiswa -"))
-
+            
             for m in db.query(Mahasiswa).filter_by(status='Aktif').all():
                 txt = f"{m.nim} - {m.nama}"
                 self.mahasiswa_map[txt] = {"id": m.id, "prodi": m.program_studi}
@@ -1157,6 +1367,7 @@ class NilaiWidget(QWidget):
             
             self.cb_mhs.setModel(model)
             self.cb_mhs.setModelColumn(0)
+            self.cb_mhs.setCurrentIndex(-1)
             
             if current_mhs_text in self.mahasiswa_map:
                 self.cb_mhs.setCurrentText(current_mhs_text)
@@ -1179,7 +1390,10 @@ class NilaiWidget(QWidget):
             if nilai and nilai.matakuliah:
                 mk = nilai.matakuliah
                 
+                self.cb_smt.blockSignals(True)
                 self.cb_smt.setCurrentText(str(mk.semester))
+                self.cb_smt.blockSignals(False)
+                
                 self.update_mk_dropdown()
                 
                 mk_text = f"{mk.kode_mk} - {mk.nama_matakuliah}"
@@ -1189,10 +1403,11 @@ class NilaiWidget(QWidget):
                 
             db.close()
         except Exception as e:
-            print(f"Row click error: {e}")
+            pass
 
     def generate_dummy(self):
         db = SessionLocal()
+        success_msg = ""
         try:
             mhs_list = db.query(Mahasiswa).filter_by(status='Aktif').all()
             mk_list = db.query(Matakuliah).all()
@@ -1227,16 +1442,20 @@ class NilaiWidget(QWidget):
             db.commit()
             if added_count > 0:
                 log_activity(self.username, "CREATE", "Nilai", f"Generate {added_count} Nilai Dummy Massal")
-                self.data_changed.emit()
-                QMessageBox.information(self, "Sukses", f"Berhasil mengisi {added_count} nilai kosong.")
-                if self.cur_mhs_id: self.load_transkrip()
-            else:
-                QMessageBox.information(self, "Info", "Semua mahasiswa sudah memiliki nilai lengkap.")
-
+                success_msg = f"Berhasil mengisi {added_count} nilai kosong."
+            
         except Exception as e:
+            db.rollback()
             QMessageBox.critical(self, "Error", str(e))
         finally:
             db.close()
+
+        if success_msg:
+            self.data_changed.emit()
+            QMessageBox.information(self, "Sukses", success_msg)
+            if self.cur_mhs_id: self.load_transkrip()
+        elif added_count == 0:
+             QMessageBox.information(self, "Info", "Semua mahasiswa sudah memiliki nilai lengkap.")
 
     def mahasiswa_dipilih(self):
         txt = self.cb_mhs.currentText()
@@ -1269,6 +1488,7 @@ class NilaiWidget(QWidget):
         if not self.cur_mhs_id: return
         db = SessionLocal()
         try:
+            self.table.blockSignals(True)
             rows = db.query(Nilai, Matakuliah).join(Matakuliah).filter(Nilai.mahasiswa_id == self.cur_mhs_id).order_by(Nilai.semester_diambil).all()
             self.table.setRowCount(0)
             tsks = 0; tbobot = 0
@@ -1288,6 +1508,7 @@ class NilaiWidget(QWidget):
             
             ipk = tbobot / tsks if tsks > 0 else 0.0
             self.lbl_ipk.setText(f"Total SKS: {tsks} | IPK: {ipk:.2f}")
+            self.table.blockSignals(False)
         finally:
             db.close()
 
@@ -1303,27 +1524,33 @@ class NilaiWidget(QWidget):
         smt = int(self.cb_smt.currentText())
 
         db = SessionLocal()
+        status_msg = ""
         try:
             exist = db.query(Nilai).filter_by(mahasiswa_id=self.cur_mhs_id, matakuliah_id=mk_id).first()
             if exist:
-                if QMessageBox.question(self, "Update", "Nilai sudah ada. Update?", QMessageBox.Yes|QMessageBox.No) == QMessageBox.Yes:
+                reply = QMessageBox.question(self, "Update", "Nilai sudah ada. Update?", QMessageBox.Yes|QMessageBox.No)
+                if reply == QMessageBox.Yes:
                     exist.nilai_huruf = hrf
                     exist.nilai_angka = angka
                     log_activity(self.username, "UPDATE", "Nilai", f"Mhs {self.cur_mhs_id} MK {mk_id} -> {hrf}")
                     db.commit()
-                    self.data_changed.emit()
-                    QMessageBox.information(self, "Sukses", "Nilai Diupdate")
+                    status_msg = "Nilai Diupdate"
             else:
                 db.add(Nilai(mahasiswa_id=self.cur_mhs_id, matakuliah_id=mk_id, nilai_huruf=hrf, nilai_angka=angka, semester_diambil=smt))
                 log_activity(self.username, "CREATE", "Nilai", f"Mhs {self.cur_mhs_id} MK {mk_id} -> {hrf}")
                 db.commit()
-                self.data_changed.emit()
-                QMessageBox.information(self, "Sukses", "Nilai Disimpan")
-            self.load_transkrip()
+                status_msg = "Nilai Disimpan"
+            
         except Exception as e:
+            db.rollback()
             QMessageBox.critical(self, "Error", str(e))
         finally:
             db.close()
+
+        if status_msg:
+            self.data_changed.emit()
+            QMessageBox.information(self, "Sukses", status_msg)
+            self.load_transkrip()
 
     def hapus_nilai(self):
         row = self.table.currentRow()
@@ -1338,10 +1565,15 @@ class NilaiWidget(QWidget):
                     db.delete(obj)
                     log_activity(self.username, "DELETE", "Nilai", f"ID {nid}")
                     db.commit()
-                    self.data_changed.emit()
-                    self.load_transkrip()
+            except Exception as e:
+                db.rollback()
+                QMessageBox.critical(self, "Error", str(e))
+                return
             finally:
                 db.close()
+
+            self.data_changed.emit()
+            self.load_transkrip()
 
     def print_transkrip(self):
         if not self.cur_mhs_id: return
@@ -1829,6 +2061,7 @@ class MainWidget(QWidget):
             
         elif self.role == "Admin Akademik":
             l.addWidget(btn("📝 Penilaian", 4))
+            l.addWidget(btn("📜 Log Sistem", 5))
         
         else:
              l.addWidget(btn("🎓 Mahasiswa", 1))
@@ -2345,6 +2578,8 @@ class AppWindow(QMainWindow):
         self.stack.addWidget(self.login)
 
     def on_login(self, user, role):
+        log_activity(user, "LOGIN", "System", f"User Login: {user} | Role: {role}")
+
         if self.stack.count() > 1:
             old_widget = self.stack.widget(1)
             self.stack.removeWidget(old_widget)
