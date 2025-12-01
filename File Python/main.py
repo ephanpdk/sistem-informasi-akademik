@@ -2190,8 +2190,8 @@ class MainWidget(QWidget):
             return f, t
 
         self.box_top10, self.table_top10 = create_table_box("🏆 Top 10 Mahasiswa Berprestasi")
-        self.box_late, self.table_late = create_table_box("⏳ Mahasiswa > 5 Tahun")
-        r3.addWidget(self.box_top10); r3.addWidget(self.box_late)
+        self.box_risk, self.table_risk = create_table_box("⚠️ Mahasiswa Perlu Bimbingan (IPK Rendah)")
+        r3.addWidget(self.box_top10); r3.addWidget(self.box_risk)
         l.addLayout(r3)
 
         l.addStretch()
@@ -2490,17 +2490,22 @@ class MainWidget(QWidget):
                     self.table_top10.insertRow(i)
                     self.table_top10.setItem(i,0,QTableWidgetItem(m.nim)); self.table_top10.setItem(i,1,QTableWidgetItem(m.nama)); self.table_top10.setItem(i,2,QTableWidgetItem(m.program_studi)); self.table_top10.setItem(i,3,QTableWidgetItem(f"{ipk:.2f}"))
 
-            lowest_gpa = sorted(final_gpa_map.items(), key=lambda x: x[1])[:5]
-            self.table_late.setRowCount(0); self.table_late.setColumnCount(4); self.table_late.setHorizontalHeaderLabels(["NIM", "Nama", "Prodi", "IPK"])
-            self.table_late.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-            for i, (mid, ipk) in enumerate(lowest_gpa):
+            risk_students = [(mid, ipk) for mid, ipk in final_gpa_map.items()]
+            risk_students.sort(key=lambda x: x[1])
+            risk_students = risk_students[:10]
+
+            self.table_risk.setRowCount(0)
+            self.table_risk.setColumnCount(4)
+            self.table_risk.setHorizontalHeaderLabels(["NIM", "Nama", "Prodi", "IPK"])
+            self.table_risk.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            for i, (mid, ipk) in enumerate(risk_students):
                 m = db.query(Mahasiswa).get(mid)
                 if m:
-                    self.table_late.insertRow(i)
-                    self.table_late.setItem(i,0,QTableWidgetItem(m.nim))
-                    self.table_late.setItem(i,1,QTableWidgetItem(m.nama))
-                    self.table_late.setItem(i,2,QTableWidgetItem(m.program_studi))
-                    self.table_late.setItem(i,3,QTableWidgetItem(f"{ipk:.2f}"))
+                    self.table_risk.insertRow(i)
+                    self.table_risk.setItem(i,0,QTableWidgetItem(m.nim))
+                    self.table_risk.setItem(i,1,QTableWidgetItem(m.nama))
+                    self.table_risk.setItem(i,2,QTableWidgetItem(m.program_studi))
+                    self.table_risk.setItem(i,3,QTableWidgetItem(f"{ipk:.2f}"))
 
             gen_data = db.query(Mahasiswa.program_studi, Mahasiswa.gender, func.count(Mahasiswa.id)).group_by(Mahasiswa.program_studi, Mahasiswa.gender).all()
             data_map = defaultdict(lambda: {'L': 0, 'P': 0}); cats_g = set()
