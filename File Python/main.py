@@ -318,7 +318,10 @@ class MahasiswaWidget(QWidget):
         fl.addWidget(QLabel("📝 Data Mahasiswa", styleSheet="font-size:18px; font-weight:bold; border:none;"))
         
         f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
+        
         self.i_nim = QLineEdit(); self.i_nim.setPlaceholderText("NIM (Cth: 2401...)")
+        self.i_nim.setValidator(QIntValidator())
+
         self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama Lengkap")
         
         self.i_prodi = QComboBox()
@@ -777,7 +780,10 @@ class DosenWidget(QWidget):
         fl.addWidget(QLabel("👨‍🏫 Data Dosen", styleSheet="font-size:18px; font-weight:bold; border:none;"))
         
         f_grid = QFormLayout(); f_grid.setVerticalSpacing(12)
+        
         self.i_nidn = QLineEdit(); self.i_nidn.setPlaceholderText("NIDN")
+        self.i_nidn.setValidator(QIntValidator())
+
         self.i_nama = QLineEdit(); self.i_nama.setPlaceholderText("Nama Lengkap")
         self.i_email = QLineEdit(); self.i_email.setPlaceholderText("Email")
         
