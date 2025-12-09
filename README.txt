@@ -143,5 +143,6 @@ TROUBLESHOOTING
   pastikan password database benar.
 
 ========================================================================
-Proudly Presented By : Zephaniah Daniel Anis & Gian Fieno Keintjem
+Proudly Presented By : Zephaniah Daniel Anis & Team Project Kelompok
+
 ========================================================================
