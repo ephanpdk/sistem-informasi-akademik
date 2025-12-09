@@ -21,19 +21,37 @@ Pastikan komputer Anda sudah terinstall:
 3. pgAdmin (Opsional, untuk memantau database).
 
 ========================================================================
-2. INSTALASI LIBRARY (DEPENDENCIES)
+2. PENGATURAN VIRTUAL ENVIRONMENT (VENV)
 ========================================================================
-Buka terminal/CMD di folder proyek ini, lalu jalankan perintah berikut
-untuk menginstall semua library yang dibutuhkan:
+Sangat disarankan menggunakan Virtual Environment yang telah disediakan 
+(atau membuatnya baru) agar instalasi library tidak mengganggu sistem 
+Python utama komputer Anda.
 
-   pip install PySide6 SQLAlchemy psycopg2-binary pandas openpyxl bcrypt faker
+Langkah 1: Membuat Venv (Jika folder 'venv' belum ada)
+Jika Anda belum melihat folder bernama 'venv' di dalam folder proyek, 
+jalankan perintah ini di terminal:
+   python -m venv venv
 
-Keterangan Library:
-- PySide6: Framework GUI Desktop.
-- SQLAlchemy & psycopg2: Koneksi ke PostgreSQL.
-- Pandas & openpyxl: Import/Export Excel.
-- Bcrypt: Keamanan password.
-- Faker: Membuat data dummy.
+Langkah 2: Mengaktifkan Venv
+Sebelum menginstall library, Anda WAJIB mengaktifkan mode venv.
+
+   > UNTUK PENGGUNA WINDOWS (Command Prompt/CMD):
+     venv\Scripts\activate
+
+   > UNTUK PENGGUNA WINDOWS (PowerShell):
+     .\venv\Scripts\activate
+     (Jika error "execution of scripts is disabled", jalankan dulu: 
+     Set-ExecutionPolicy RemoteSigned -Scope CurrentUser)
+
+   > UNTUK PENGGUNA MAC / LINUX:
+     source venv/bin/activate
+
+Langkah 3: Pastikan Venv Aktif
+Jika berhasil, di sebelah kiri baris perintah terminal akan muncul tanda:
+   (venv) C:\Users\NamaUser\Project> ...
+
+*Catatan: Jika Anda menutup terminal, Anda harus melakukan Langkah 2 lagi 
+sebelum menjalankan aplikasi nanti.*
 
 ========================================================================
 3. KONFIGURASI DATABASE
